@@ -112,7 +112,7 @@ This prevents readers from skipping the autograd section and missing per-script 
 
 **Success criteria:**
 
-- Final loss: < 2.5 (character-level cross-entropy)
+- Final loss: < 2.7 (character-level cross-entropy, single-document per step — stochastic, not averaged)
 - Generated names: ≥50% pronounceable English-like sequences
 - Runtime: < 7 minutes on M-series Mac
 
