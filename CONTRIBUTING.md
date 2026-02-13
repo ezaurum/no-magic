@@ -13,7 +13,7 @@ These are not guidelines. They are hard requirements. PRs that violate any of th
 | **One file** | Every script is a single `.py` file. No local imports, no `utils.py`, no companion files. |
 | **Zero dependencies** | Python standard library only. If it needs `pip install`, it doesn't belong here. Allowed modules: `os`, `math`, `random`, `json`, `struct`, `urllib`, `collections`, `itertools`, `functools`, `string`, `hashlib`, `time`. |
 | **Trains and infers** | Every script includes both the complete learning loop and inference/generation. The reader sees the full lifecycle. |
-| **Runs in minutes** | Under 10 minutes on a modern laptop CPU (M-series Mac or equivalent). No GPU required. |
+| **Runs in minutes** | Under **7 minutes on M-series Mac** or **10 minutes on 2019-era Intel i5**. No GPU required. |
 | **Self-contained data** | Datasets are auto-downloaded on first run via `urllib` and cached locally. No manual download steps. Max 5MB. |
 | **Reproducible** | `random.seed(42)` at the top of every script. Same input, same output. |
 | **Commented** | Every script must follow the commenting standard described below. This is the single most common reason PRs are rejected. |
@@ -269,9 +269,18 @@ Before submitting, verify every item:
 - [ ] `python script.py` runs with zero arguments and exits cleanly
 - [ ] No imports outside Python standard library
 - [ ] `random.seed(42)` at the top
-- [ ] Completes in under 10 minutes on a laptop CPU
+- [ ] Completes in under 7 minutes on M-series Mac (or 10 minutes on 2019 Intel i5)
 - [ ] Prints training progress (step number, loss)
 - [ ] Prints inference results demonstrating the trained model
+- [ ] Meets the success criteria defined in `docs/implementation.md` for this script
+
+**Autograd & Numerical Stability** (for scripts using scalar autograd)
+- [ ] `Value` class implements the canonical interface from `docs/autograd-interface.md`
+- [ ] Autograd callout block present after Value class (documents per-script differences)
+- [ ] Stable softmax: `exp(x - max(x))` pattern with explanatory comment
+- [ ] Clipped log-probabilities: `max(p, 1e-10)` before `log()` with comment
+- [ ] Adam epsilon: `1e-8` in denominator with comment
+- [ ] Test vectors pass (from `docs/autograd-interface.md`)
 
 **Commenting (non-negotiable)**
 - [ ] File opens with a one-sentence thesis docstring
@@ -290,7 +299,7 @@ Before submitting, verify every item:
 - [ ] No unnecessary complexity or cleverness
 
 **Logistics**
-- [ ] File placed in correct tier directory
+- [ ] File placed in correct tier directory (`foundational/`, `alignment/`, or `systems/`)
 - [ ] PR description includes runtime, line count, and sample output
 - [ ] No extra files included
 - [ ] Attribution comments for any referenced papers or implementations
