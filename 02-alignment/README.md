@@ -2,14 +2,14 @@
 
 Methods for steering, fine-tuning, and aligning models after pretraining. These are the techniques that turn a base model into something useful.
 
-## Planned Scripts
+## Scripts
 
 | Script | Algorithm | Status |
 |---|---|---|
-| `microlora.py` | Low-Rank Adaptation (LoRA) fine-tuning | Planned |
-| `microdpo.py` | Direct Preference Optimization | Planned |
-| `microppo.py` | Proximal Policy Optimization for RLHF (hybrid autograd) | Planned |
-| `micromoe.py` | Mixture of Experts with sparse routing (hybrid autograd) | Planned |
+| `microlora.py` | Low-Rank Adaptation (LoRA) fine-tuning | Complete |
+| `microdpo.py` | Direct Preference Optimization | Complete |
+| `microppo.py` | Proximal Policy Optimization for RLHF (hybrid autograd) | Complete |
+| `micromoe.py` | Mixture of Experts with sparse routing (hybrid autograd) | Complete |
 
 ### Hybrid Autograd Scripts
 

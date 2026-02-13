@@ -2,15 +2,15 @@
 
 The engineering that makes models fast, small, and deployable. These scripts demystify the optimizations that turn research prototypes into production systems.
 
-## Planned Scripts
+## Scripts
 
 | Script | Algorithm | Status |
 |---|---|---|
-| `microattention.py` | Attention variants compendium (MHA, GQA, MQA, sliding window) | Planned |
-| `microkv.py` | KV-cache mechanics (with vs. without, paged attention) | Planned |
-| `microquant.py` | Weight quantization (INT8, INT4, per-channel vs. per-tensor) | Planned |
-| `microflash.py` | Flash Attention algorithmic simulation (tiling, online softmax) | Planned |
-| `microbeam.py` | Decoding strategies (greedy, top-k, top-p, beam, speculative) | Planned |
+| `microattention.py` | Attention variants compendium (MHA, GQA, MQA, sliding window) | Complete |
+| `microkv.py` | KV-cache mechanics (with vs. without, paged attention) | Complete |
+| `microquant.py` | Weight quantization (INT8, INT4, per-channel vs. per-tensor) | Complete |
+| `microflash.py` | Flash Attention algorithmic simulation (tiling, online softmax) | Complete |
+| `microbeam.py` | Decoding strategies (greedy, top-k, top-p, beam, speculative) | Complete |
 
 ### Forward-Pass Scripts
 
