@@ -78,7 +78,7 @@ Scripts that need additional operations beyond the base set must:
 
 | Script         | Additional Operations | Why Needed                                     |
 | -------------- | --------------------- | ---------------------------------------------- |
-| `micrornn.py`  | `sigmoid()`           | GRU gating: `z_t = sigmoid(...)`               |
+| `04-micrornn.py`  | `sigmoid()`           | GRU gating: `z_t = sigmoid(...)`               |
 | `microlora.py` | (none beyond base)    | Uses base set                                  |
 | `microdpo.py`  | `log()`               | Log-probability ratios in DPO loss             |
 | `microppo.py`  | `log()`, `clip()`     | PPO ratio clipping, log-probs                  |
@@ -130,10 +130,14 @@ def softmax(logits):
 ```python
 def safe_log(x):
     # Prevent log(0) which returns -inf and breaks gradient computation.
-    # Clipping to 1e-10 gives log(1e-10) = -23, which is finite and
+    # Clipping to 1e-10 gives log(1e-10) ≈ -23, which is finite and
     # preserves gradient information for near-zero probabilities.
+    #
+    # Critical: we build the log node manually with x as its child so gradients
+    # flow back through the computation graph. Using Value(clamped).log() would
+    # create a disconnected node, severing the gradient path entirely.
     clamped = max(x.data, 1e-10)
-    return Value(clamped).log()
+    return Value(math.log(clamped), (x,), (1.0 / clamped,))
 ```
 
 ### Adam Epsilon
