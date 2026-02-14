@@ -1,8 +1,20 @@
+![no-magic](./assets/banner.png)
+
+![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue?style=flat-square&logo=python&logoColor=white)
+
+![License: MIT](https://img.shields.io/github/license/Mathews-Tom/no-magic?style=flat-square)
+
+![Zero Dependencies](https://img.shields.io/badge/dependencies-zero-brightgreen?style=flat-square)
+
+![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen?style=flat-square)
+
+![GitHub stars](https://img.shields.io/github/stars/Mathews-Tom/no-magic?style=flat-square)
+
+![Last Commit](https://img.shields.io/github/last-commit/Mathews-Tom/no-magic?style=flat-square)
+
 # no-magic
 
 **Because `model.fit()` isn't an explanation.**
-
-![no-magic](./assets/banner.png)
 
 ---
 
