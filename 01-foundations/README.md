@@ -36,7 +36,7 @@ microtokenizer.py   → 어떻게 텍스트가 숫자가 되나
 microembedding.py   → 어떻게 의미가 기하학이 되나
 microgpt.py         → 어떻게 시퀀스가 예측이 되나
 microrag.py         → 어떻게 검색이 생성을 보강하나
-micrornn.py         → 어텐션 이전에 시퀀스를 어떻게 모델링했나
+micrornn.py         → 어떻게 어텐션 이전에 시퀀스를 모델링했나
 microdiffusion.py   → 어떻게 노이즈에서 데이터가 나오나
 microvae.py         → 어떻게 압축된 생성 표현을 학습하나
 ```
