@@ -1,6 +1,6 @@
 """
-Every attention mechanism that matters, side by side: how MHA, GQA, MQA, and sliding
-window trade off memory, compute, and representational power on the same input.
+중요한 attention 메커니즘을 나란히 비교함: MHA, GQA, MQA, sliding window이
+동일한 입력에서 메모리, 연산, 표현력을 어떻게 트레이드오프하는지 보여줌.
 """
 # Reference: Vaswani et al., "Attention Is All You Need" (2017) for scaled dot-product
 # and multi-head attention. Shazeer, "Fast Transformer Decoding" (2019) for multi-query.
@@ -24,25 +24,25 @@ HEAD_DIM = D_MODEL // N_HEADS  # = 16
 N_KV_HEADS_GQA = 2
 WINDOW_SIZE = 8
 
-# Signpost: production transformers use d_model=4096+, 32-128 heads, seq_len=8192+.
-# These toy dimensions preserve every algorithmic detail while staying fast.
+# 참고: 프로덕션 트랜스포머는 d_model=4096+, 32-128 헤드, seq_len=8192+를 사용함.
+# 이 토이 차원은 모든 알고리즘 디테일을 보존하면서 빠르게 실행됨.
 
 
 # === HELPER FUNCTIONS ===
-# Matrix operations on plain Python lists-of-lists -- the linear algebra
-# primitives that attention is built from.
+# 일반 Python 리스트의 리스트로 구현한 행렬 연산 -- attention의 기반이 되는
+# 선형대수 프리미티브들임.
 
 def rand_matrix(rows: int, cols: int) -> list[list[float]]:
-    """Random matrix with Xavier-like 1/sqrt(cols) scaling to prevent softmax saturation."""
+    """Xavier 스타일 1/sqrt(cols) 스케일링으로 softmax 포화를 방지하는 랜덤 행렬."""
     s = 1.0 / math.sqrt(cols)
     return [[random.gauss(0, s) for _ in range(cols)] for _ in range(rows)]
 
 
 def matmul(a: list[list[float]], b: list[list[float]]) -> list[list[float]]:
-    """A[m,k] @ B[k,n] -> C[m,n]. The dominant cost in every attention variant."""
+    """A[m,k] @ B[k,n] -> C[m,n]. 모든 attention 변형에서 가장 비용이 큰 연산임."""
     k = len(a[0])
     n = len(b[0])
-    # Pre-transpose B for row-contiguous inner loop access
+    # B를 미리 전치해서 내부 루프의 행 접근이 연속적이게 함
     bt = [[b[r][c] for r in range(k)] for c in range(n)]
     return [[sum(a[i][p] * bt[j][p] for p in range(k)) for j in range(n)]
             for i in range(len(a))]
@@ -53,8 +53,8 @@ def transpose(m: list[list[float]]) -> list[list[float]]:
 
 
 def softmax_row(row: list[float]) -> list[float]:
-    """Stable softmax: subtract max to prevent exp() overflow.
-    exp(x-c)/sum(exp(x_j-c)) = exp(x)/sum(exp(x_j)) for any constant c."""
+    """안정적인 softmax: max를 빼서 exp() 오버플로를 방지함.
+    exp(x-c)/sum(exp(x_j-c)) = exp(x)/sum(exp(x_j))이 임의의 상수 c에 대해 성립함."""
     mx = max(row)
     exps = [math.exp(x - mx) for x in row]
     s = sum(exps)
@@ -66,7 +66,7 @@ def flatten(m: list[list[float]]) -> list[float]:
 
 
 def cosine_sim(a: list[float], b: list[float]) -> float:
-    """Directional agreement between vectors, ignoring magnitude."""
+    """벡터 간 방향 일치도를 측정함. 크기는 무시함."""
     dot = sum(x * y for x, y in zip(a, b))
     na = math.sqrt(sum(x * x for x in a))
     nb = math.sqrt(sum(x * x for x in b))
@@ -76,8 +76,8 @@ def cosine_sim(a: list[float], b: list[float]) -> float:
 def avg_head_weights(
     w: list[list[float]], head_dim: int, n_heads: int, n_kv_heads: int
 ) -> list[list[float]]:
-    """Derive reduced KV weights by averaging MHA head groups (Ainslie et al. 2023).
-    For GQA/MQA conversion from MHA, mean-pool KV columns within each group."""
+    """MHA 헤드 그룹을 평균내서 축소된 KV 가중치를 만듦 (Ainslie et al. 2023).
+    MHA에서 GQA/MQA로 변환할 때, 각 그룹 내 KV 열을 평균 풀링함."""
     gs = n_heads // n_kv_heads
     d = len(w)
     kv_dim = n_kv_heads * head_dim
@@ -98,11 +98,11 @@ def vanilla_attention(
 ) -> list[list[float]]:
     """Scaled dot-product attention: softmax(Q @ K^T / sqrt(d_k)) @ V
 
-    The sqrt(d_k) scaling is critical: without it, dot products grow proportional
-    to d_k, pushing softmax into saturation (near-one-hot outputs). Dividing by
-    sqrt(d_k) keeps variance at ~1.0 so softmax produces useful distributions."""
+    sqrt(d_k) 스케일링이 핵심임: 이게 없으면 내적이 d_k에 비례해서 커지고,
+    softmax가 포화 상태(거의 원-핫 출력)로 밀림. sqrt(d_k)로 나누면
+    분산이 ~1.0으로 유지돼서 softmax가 유용한 분포를 만듦."""
     scale = 1.0 / math.sqrt(len(q[0]))
-    # scores[i][j] = how much position i attends to position j
+    # scores[i][j] = 위치 i가 위치 j에 얼마나 attend하는지
     scores = [[v * scale for v in row] for row in matmul(q, transpose(k))]
     weights = [softmax_row(row) for row in scores]
     return matmul(weights, v)
@@ -115,9 +115,9 @@ def multi_head_attention(
     """MHA(X) = Concat(head_1, ..., head_h) @ W_O
     where head_i = Attention(X @ W_Q_i, X @ W_K_i, X @ W_V_i)
 
-    Why multiple heads? Each head learns a different notion of "relevance" --
-    syntactic, semantic, positional. Total attention FLOPs equal single-head;
-    we just partition d_model across heads. The benefit is representational."""
+    왜 여러 헤드인가? 각 헤드가 다른 종류의 "관련성"을 학습함 --
+    구문적, 의미적, 위치적. 전체 attention FLOPs은 단일 헤드와 동일함;
+    d_model을 헤드 수로 분할할 뿐임. 이점은 표현력에 있음."""
     seq_len = len(x)
     hd = len(x[0]) // n_heads
     q_full, k_full, v_full = matmul(x, w_q), matmul(x, w_k), matmul(x, w_v)
@@ -129,7 +129,7 @@ def multi_head_attention(
             [r[lo:hi] for r in q_full], [r[lo:hi] for r in k_full],
             [r[lo:hi] for r in v_full]))
 
-    # Concatenate heads, then project. W_O is where cross-head mixing happens.
+    # 헤드를 연결한 뒤 프로젝션함. W_O가 헤드 간 믹싱이 일어나는 곳임.
     concat = [[c for h in heads for c in h[i]] for i in range(seq_len)]
     return matmul(concat, w_o)
 
@@ -139,16 +139,16 @@ def grouped_query_attention(
     w_v_r: list[list[float]], w_o: list[list[float]],
     n_heads: int, n_kv_heads: int,
 ) -> list[list[float]]:
-    """GQA: partition query heads into groups sharing KV projections.
-    With 4 query heads and 2 KV heads, heads 0-1 share one KV pair and 2-3 another.
+    """GQA: query 헤드를 그룹으로 나눠서 KV 프로젝션을 공유함.
+    4개 query 헤드와 2개 KV 헤드가 있으면, 헤드 0-1이 하나의 KV 쌍을, 2-3이 다른 쌍을 공유함.
 
-    Why this works: in trained MHA models, KV representations across heads are
-    highly correlated. GQA exploits this redundancy -- sharing KV heads loses
-    little quality while cutting KV cache memory proportionally.
-    LLaMA 2 70B uses GQA with 8 KV heads for 64 query heads."""
+    왜 이게 되는가: 학습된 MHA 모델에서 KV 표현은 헤드 간에 매우 상관관계가 높음.
+    GQA는 이 중복성을 활용함 -- KV 헤드를 공유해도 품질 손실이 적으면서
+    KV cache 메모리를 비례적으로 줄임.
+    LLaMA 2 70B는 64개 query 헤드에 8개 KV 헤드로 GQA를 사용함."""
     seq_len = len(x)
     hd = len(x[0]) // n_heads
-    gs = n_heads // n_kv_heads  # query heads per KV group
+    gs = n_heads // n_kv_heads  # KV 그룹당 query 헤드 수
 
     q_full = matmul(x, w_q)
     k_r, v_r = matmul(x, w_k_r), matmul(x, w_v_r)
@@ -156,7 +156,7 @@ def grouped_query_attention(
     heads = []
     for h in range(n_heads):
         q_lo, q_hi = h * hd, (h + 1) * hd
-        g = h // gs  # KV group index
+        g = h // gs  # KV 그룹 인덱스
         kv_lo, kv_hi = g * hd, (g + 1) * hd
         heads.append(vanilla_attention(
             [r[q_lo:q_hi] for r in q_full], [r[kv_lo:kv_hi] for r in k_r],
@@ -170,12 +170,12 @@ def multi_query_attention(
     x: list[list[float]], w_q: list[list[float]], w_k_s: list[list[float]],
     w_v_s: list[list[float]], w_o: list[list[float]], n_heads: int,
 ) -> list[list[float]]:
-    """MQA: all query heads share a single KV head (GQA with n_kv=1).
+    """MQA: 모든 query 헤드가 하나의 KV 헤드를 공유함 (n_kv=1인 GQA).
 
-    During autoregressive decoding, KV cache scales as O(layers*heads*seq*hd).
-    MQA reduces this to O(layers*seq*hd) -- a factor-of-heads reduction.
-    PaLM, Falcon, and StarCoder use MQA for this memory saving.
-    Tradeoff: all heads see one KV view, reducing representational diversity."""
+    autoregressive 디코딩 시 KV cache는 O(layers*heads*seq*hd)로 스케일됨.
+    MQA는 이걸 O(layers*seq*hd)로 줄임 -- 헤드 수만큼 감소함.
+    PaLM, Falcon, StarCoder가 이 메모리 절약을 위해 MQA를 사용함.
+    트레이드오프: 모든 헤드가 하나의 KV 뷰를 보기 때문에 표현 다양성이 줄어듦."""
     seq_len = len(x)
     hd = len(x[0]) // n_heads
 
@@ -185,7 +185,7 @@ def multi_query_attention(
     heads = []
     for h in range(n_heads):
         lo, hi = h * hd, (h + 1) * hd
-        # Every head reuses the same K, V -- the entire MQA idea
+        # 모든 헤드가 같은 K, V를 재사용함 -- MQA의 핵심 아이디어
         heads.append(vanilla_attention([r[lo:hi] for r in q_full], k_s, v_s))
 
     concat = [[c for h in heads for c in h[i]] for i in range(seq_len)]
@@ -196,20 +196,20 @@ def sliding_window_attention(
     q: list[list[float]], k: list[list[float]], v: list[list[float]],
     window_size: int,
 ) -> list[list[float]]:
-    """Each position attends only to its w nearest predecessors: O(n*w) not O(n^2).
+    """각 위치가 가장 가까운 w개의 이전 위치에만 attend함: O(n^2)가 아닌 O(n*w).
 
-    Why local attention works: most relevant context is nearby. Full attention
-    over 100K tokens wastes compute on distant, irrelevant positions.
+    왜 로컬 attention이 되는가: 대부분의 관련 컨텍스트는 가까이에 있음.
+    100K 토큰에 대한 풀 attention은 먼 곳의 관련 없는 위치에 연산을 낭비함.
 
-    Signpost: Mistral 7B uses sliding window (w=4096) interleaved with full
-    attention layers. Longformer adds sparse global tokens. Pure local here."""
+    참고: Mistral 7B는 sliding window (w=4096)을 풀 attention 레이어와
+    번갈아 사용함. Longformer는 희소 글로벌 토큰을 추가함. 여기선 순수 로컬만 구현함."""
     d_k = len(q[0])
     scale = 1.0 / math.sqrt(d_k)
     output = []
     for i in range(len(q)):
         start = max(0, i - window_size + 1)
-        # Scores computed only within window -- positions outside are never
-        # evaluated, not just masked. This is the compute saving.
+        # 윈도우 내에서만 점수를 계산함 -- 윈도우 밖의 위치는 마스킹이 아니라
+        # 아예 계산하지 않음. 이게 연산 절약의 핵심임.
         scores = [sum(q[i][d] * k[j][d] for d in range(d_k)) * scale
                   for j in range(start, i + 1)]
         weights = softmax_row(scores)
@@ -222,39 +222,39 @@ def sliding_window_attention(
 
 
 # === FLOP AND MEMORY ANALYSIS ===
-# FLOPs: multiply-add = 2 FLOPs. Memory: peak floats for scores / KV cache.
+# FLOPs: 곱셈-덧셈 = 2 FLOPs. 메모리: 점수 / KV cache의 피크 float 수.
 #
-# Core formulas:
-#   Vanilla:  4*n^2*d  (QK^T + attn@V, no projections)
-#   MHA:      8*n*d^2 + 4*n^2*d  (projections + attention)
-#   GQA:      saves on KV projection (2*n*d*(nkv*hd) instead of 2*n*d*d for K,V)
-#   MQA:      minimal KV projection (2*n*d*hd for K,V)
-#   Window:   8*n*d^2 + 4*n*w*d  (projections + local attention)
+# 핵심 공식:
+#   Vanilla:  4*n^2*d  (QK^T + attn@V, 프로젝션 제외)
+#   MHA:      8*n*d^2 + 4*n^2*d  (프로젝션 + attention)
+#   GQA:      KV 프로젝션 절약 (K,V에 대해 2*n*d*d 대신 2*n*d*(nkv*hd))
+#   MQA:      최소 KV 프로젝션 (K,V에 대해 2*n*d*hd)
+#   Window:   8*n*d^2 + 4*n*w*d  (프로젝션 + 로컬 attention)
 
 def compute_analysis(
     n: int, d: int, h: int, hd: int, nkv: int, w: int
 ) -> list[tuple[str, int, int]]:
-    """Return (name, flops, memory) for each variant."""
+    """각 변형의 (name, flops, memory)를 반환함."""
     return [
         ("Vanilla (single-head)",
          4 * n * n * d,
-         n * n),  # full n x n score matrix
+         n * n),  # 전체 n x n 점수 행렬
 
         (f"Multi-Head ({h} heads)",
          8 * n * d * d + 4 * n * n * d,
-         n * n),  # sequential: one head's scores at a time
+         n * n),  # 순차적: 한 번에 하나의 헤드 점수만
 
         (f"GQA ({h}q, {nkv}kv heads)",
          2*n*d*d + 2*2*n*d*(nkv*hd) + 2*n*d*d + 4*n*n*d,
-         2 * nkv * n * hd),  # KV cache: the primary saving
+         2 * nkv * n * hd),  # KV cache: 주요 절약 포인트
 
         (f"MQA ({h}q, 1kv head)",
          2*n*d*d + 2*2*n*d*hd + 2*n*d*d + 4*n*n*d,
-         2 * n * hd),  # single KV head
+         2 * n * hd),  # 단일 KV 헤드
 
         (f"Sliding Window (w={w})",
          8 * n * d * d + 4 * n * w * d,
-         n * w),  # w scores per position instead of n
+         n * w),  # 위치당 n 대신 w개의 점수
     ]
 
 
@@ -272,9 +272,9 @@ if __name__ == "__main__":
     w_v = rand_matrix(D_MODEL, D_MODEL)
     w_o = rand_matrix(D_MODEL, D_MODEL)
 
-    # Derive reduced KV weights by averaging MHA head groups (Ainslie et al. 2023).
-    # This mirrors how GQA models are initialized from MHA checkpoints, ensuring
-    # GQA/MQA outputs approximate MHA rather than being unrelated random projections.
+    # MHA 헤드 그룹을 평균내서 축소된 KV 가중치를 만듦 (Ainslie et al. 2023).
+    # 이것은 GQA 모델이 MHA 체크포인트에서 초기화되는 방식을 따라함.
+    # GQA/MQA 출력이 무관한 랜덤 프로젝션이 아니라 MHA를 근사하게 함.
     w_k_gqa = avg_head_weights(w_k, HEAD_DIM, N_HEADS, N_KV_HEADS_GQA)
     w_v_gqa = avg_head_weights(w_v, HEAD_DIM, N_HEADS, N_KV_HEADS_GQA)
     w_k_mqa = avg_head_weights(w_k, HEAD_DIM, N_HEADS, 1)
@@ -296,15 +296,15 @@ if __name__ == "__main__":
     run(f"MQA ({N_HEADS}q, 1kv head)",
         multi_query_attention, x, w_q, w_k_mqa, w_v_mqa, w_o, N_HEADS)
 
-    # Sliding window: project with full MHA weights, then restrict attention to
-    # a local window. This isolates the windowing effect from projection differences.
+    # Sliding window: 풀 MHA 가중치로 프로젝션한 뒤, attention을 로컬 윈도우로
+    # 제한함. 프로젝션 차이가 아닌 윈도우 효과만 분리해서 보기 위함임.
     q_p, k_p, v_p = matmul(x, w_q), matmul(x, w_k), matmul(x, w_v)
     t0 = time.time()
     sw = sliding_window_attention(q_p, k_p, v_p, WINDOW_SIZE)
     sw_out = matmul(sw, w_o)
     results[f"Sliding Window (w={WINDOW_SIZE})"] = (sw_out, (time.time() - t0) * 1000)
 
-    # Validate: no NaN or Inf in any output
+    # 검증: 모든 출력에 NaN이나 Inf가 없는지 확인
     all_valid = True
     for name, (out, _) in results.items():
         flat = flatten(out)
@@ -313,17 +313,17 @@ if __name__ == "__main__":
             all_valid = False
     print(f"Numerical validity: {'all outputs clean' if all_valid else 'ISSUES DETECTED'}\n")
 
-    # Cosine similarity to MHA -- measures how much information each variant
-    # preserves relative to full multi-head attention
+    # MHA 대비 코사인 유사도 -- 각 변형이 풀 multi-head attention 대비
+    # 정보를 얼마나 보존하는지 측정함
     mha_key = f"Multi-Head ({N_HEADS} heads)"
     mha_flat = flatten(results[mha_key][0])
     sims = {n: cosine_sim(flatten(o), mha_flat) for n, (o, _) in results.items()}
 
-    # Analytical cost model
+    # 분석적 비용 모델
     analysis = compute_analysis(SEQ_LEN, D_MODEL, N_HEADS, HEAD_DIM,
                                 N_KV_HEADS_GQA, WINDOW_SIZE)
 
-    # --- Print comparison table ---
+    # --- 비교 테이블 출력 ---
     hdr = (f"{'Variant':<28} {'FLOPs':>12} {'Memory':>10} "
            f"{'Cos Sim':>10} {'Time(ms)':>10}")
     print(hdr)
@@ -333,7 +333,7 @@ if __name__ == "__main__":
         ms = results[name][1] if name in results else 0.0
         print(f"{name:<28} {flops:>12,} {mem:>10,} {cs:>10.4f} {ms:>10.2f}")
 
-    # --- Takeaways ---
+    # --- 핵심 요약 ---
     print("\n=== Key Takeaways ===\n")
     print("1. MHA and vanilla share attention FLOPs (4*n^2*d). MHA adds projection")
     print("   cost (8*n*d^2) but gains multiple learned attention patterns.")

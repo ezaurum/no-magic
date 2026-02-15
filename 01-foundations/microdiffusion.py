@@ -1,12 +1,12 @@
 """
-How images emerge from noise -- the denoising diffusion algorithm behind Stable Diffusion,
-demonstrated on a 2D spiral. Train a model to predict noise, then iteratively remove it to
-generate new samples from pure randomness.
+noise에서 이미지가 어떻게 생성되는지 -- Stable Diffusion의 기반인 denoising diffusion 알고리즘을
+2D spiral로 시연함. noise를 예측하는 모델을 학습한 뒤, 순수한 랜덤에서 반복적으로 noise를 제거해
+새로운 sample을 생성함.
 """
 # Reference: Ho et al., "Denoising Diffusion Probabilistic Models" (2020).
 # https://arxiv.org/abs/2006.11239
-# This 2D implementation preserves the exact DDPM algorithm used in Stable Diffusion,
-# scaled down from billion-param U-Nets on images to ~1000-param MLPs on point clouds.
+# 이 2D 구현은 Stable Diffusion에서 사용되는 DDPM 알고리즘을 그대로 보존하되,
+# 이미지에 대한 수십억 파라미터 U-Net을 point cloud에 대한 ~1000 파라미터 MLP로 축소함.
 
 from __future__ import annotations
 
@@ -18,50 +18,49 @@ random.seed(42)
 
 # === CONSTANTS ===
 
-# Diffusion process hyperparameters
-T = 100  # Number of diffusion timesteps -- production models use 1000, but 100 is
-# enough to demonstrate the algorithm without excessive runtime
-BETA_START = 0.0001  # Initial noise level (very small)
-BETA_END = 0.02  # Final noise level (moderate corruption)
-# Why linear schedule: simplest option; cosine schedules improve quality but add
-# complexity. The linear schedule is enough to teach the core algorithm.
+# Diffusion process hyperparameter
+T = 100  # diffusion timestep 수 -- 프로덕션 모델은 1000을 사용하지만, 과도한 실행 시간 없이
+# 알고리즘을 보여주기에는 100이면 충분함
+BETA_START = 0.0001  # 초기 noise 수준 (매우 작음)
+BETA_END = 0.02  # 최종 noise 수준 (적당한 corruption)
+# 왜 linear schedule인가: 가장 단순한 옵션임; cosine schedule이 품질을 개선하지만
+# 복잡성이 추가됨. 핵심 알고리즘을 가르치기에는 linear schedule로 충분함.
 
-# Model architecture
-HIDDEN_DIM = 64  # MLP hidden layer size (~1000 total params)
-TIME_EMB_DIM = 32  # Sinusoidal timestep embedding dimension
+# 모델 아키텍처
+HIDDEN_DIM = 64  # MLP hidden layer 크기 (~1000 총 파라미터)
+TIME_EMB_DIM = 32  # sinusoidal timestep embedding 차원
 
-# Training
-NUM_EPOCHS = 8000  # Training iterations (each processes one random (x0, t) pair)
-# 8000 updates for 6400 params ≈ 1.25 updates/param — sufficient for a smooth
-# 2D spiral. Production DDPM trains for millions of updates.
+# 학습
+NUM_EPOCHS = 8000  # 학습 iteration (각각 하나의 랜덤 (x0, t) 쌍을 처리함)
+# 6400개 파라미터에 8000번 업데이트 ≈ 파라미터당 1.25번 업데이트 — 부드러운
+# 2D spiral에 충분함. 프로덕션 DDPM은 수백만 번 업데이트함.
 LEARNING_RATE = 0.001  # Adam learning rate
-NUM_SAMPLES = 800  # Number of training data points (2D spiral)
+NUM_SAMPLES = 800  # 학습 데이터 포인트 수 (2D spiral)
 
-# Inference
-NUM_GENERATED = 500  # Number of samples to generate for statistics
+# 추론
+NUM_GENERATED = 500  # 통계를 위해 생성할 sample 수
 
 
 # === SYNTHETIC DATA GENERATION ===
 
 def generate_spiral(num_points: int) -> list[tuple[float, float]]:
-    """Generate a 2D spiral point cloud for training.
+    """학습용 2D spiral point cloud를 생성함.
 
-    The spiral grows linearly in radius as angle increases, creating a non-trivial
-    distribution that's easy to verify visually via statistics (mean near origin,
-    bounded variance). This tests whether the model learns structure, not just
-    memorizes Gaussian blobs.
+    spiral은 각도가 증가하면서 반지름이 선형적으로 커져, 통계로 시각적 검증이
+    쉬운 비자명한 분포를 만듦 (평균이 원점 근처, 제한된 분산).
+    모델이 Gaussian blob을 암기하는 게 아니라 구조를 학습하는지 테스트함.
     """
     points = []
     for i in range(num_points):
-        # Parametric spiral: r = theta / (2*pi) for one revolution per unit radius
-        theta = (i / num_points) * 4 * math.pi  # 2 full revolutions
+        # 파라메트릭 spiral: r = theta / (2*pi), 단위 반지름당 한 바퀴
+        theta = (i / num_points) * 4 * math.pi  # 2바퀴 회전
         r = theta / (2 * math.pi)
 
-        # Convert to Cartesian coordinates
+        # 직교 좌표로 변환
         x = r * math.cos(theta)
         y = r * math.sin(theta)
 
-        # Add small Gaussian noise to make it realistic (not a perfect curve)
+        # 현실적으로 만들기 위해 작은 Gaussian noise를 추가함 (완벽한 곡선이 아님)
         x += random.gauss(0, 0.05)
         y += random.gauss(0, 0.05)
 
@@ -73,40 +72,39 @@ def generate_spiral(num_points: int) -> list[tuple[float, float]]:
 # === NOISE SCHEDULE ===
 
 def compute_noise_schedule(t_steps: int, beta_start: float, beta_end: float):
-    """Precompute noise schedule coefficients for all timesteps.
+    """모든 timestep에 대한 noise schedule 계수를 미리 계산함.
 
-    The forward diffusion process adds Gaussian noise at each timestep according to:
+    forward diffusion process는 각 timestep에서 다음에 따라 Gaussian noise를 추가함:
         q(x_t | x_{t-1}) = N(x_t; sqrt(1 - beta_t) * x_{t-1}, beta_t * I)
 
-    We precompute alpha_bar_t = prod(1 - beta_i for i in 1..t) to enable direct
-    noising to arbitrary timesteps without sequential application:
+    alpha_bar_t = prod(1 - beta_i for i in 1..t)를 미리 계산해
+    순차 적용 없이 임의의 timestep으로 직접 noising할 수 있음:
         q(x_t | x_0) = N(x_t; sqrt(alpha_bar_t) * x_0, (1 - alpha_bar_t) * I)
 
-    This closed-form jump is what makes diffusion models practical to train --
-    we can sample any timestep in O(1) rather than stepping through all t-1 prior
-    timesteps.
+    이 closed-form 점프가 diffusion model 학습을 실용적으로 만드는 핵심 --
+    t-1개의 이전 timestep을 순차적으로 거치지 않고 O(1)에 임의의 timestep을 샘플링할 수 있음.
 
     Returns:
-        betas: noise variance at each timestep (length T)
-        alphas: 1 - beta at each timestep (length T)
-        alpha_bars: cumulative product of alphas (length T)
-        sqrt_alpha_bars: precomputed sqrt for noising (length T)
-        sqrt_one_minus_alpha_bars: precomputed sqrt for noise coefficient (length T)
+        betas: 각 timestep의 noise variance (길이 T)
+        alphas: 각 timestep의 1 - beta (길이 T)
+        alpha_bars: alpha의 누적 곱 (길이 T)
+        sqrt_alpha_bars: noising용 미리 계산된 sqrt (길이 T)
+        sqrt_one_minus_alpha_bars: noise 계수용 미리 계산된 sqrt (길이 T)
     """
-    # Linear interpolation from beta_start to beta_end
+    # beta_start에서 beta_end까지 선형 보간
     betas = [beta_start + (beta_end - beta_start) * t / (t_steps - 1)
              for t in range(t_steps)]
 
     alphas = [1.0 - b for b in betas]
 
-    # Cumulative product: alpha_bar_t = alpha_1 * alpha_2 * ... * alpha_t
+    # 누적 곱: alpha_bar_t = alpha_1 * alpha_2 * ... * alpha_t
     alpha_bars = []
     product = 1.0
     for alpha in alphas:
         product *= alpha
         alpha_bars.append(product)
 
-    # Precompute square roots for forward process formula
+    # forward process 수식을 위한 제곱근을 미리 계산함
     sqrt_alpha_bars = [math.sqrt(ab) for ab in alpha_bars]
     sqrt_one_minus_alpha_bars = [math.sqrt(1.0 - ab) for ab in alpha_bars]
 
@@ -116,18 +114,18 @@ def compute_noise_schedule(t_steps: int, beta_start: float, beta_end: float):
 # === TIMESTEP EMBEDDING ===
 
 def sinusoidal_embedding(t: int, dim: int) -> list[float]:
-    """Encode timestep t as a vector using sinusoidal positional encoding.
+    """sinusoidal positional encoding을 사용해 timestep t를 벡터로 인코딩함.
 
-    For dimension i:
+    차원 i에 대해:
         emb[2*i]   = sin(t / 10000^(2*i/dim))
         emb[2*i+1] = cos(t / 10000^(2*i/dim))
 
-    Why sinusoidal: provides a unique representation for each timestep with smooth
-    interpolation between adjacent steps. Lower frequency components (early dims)
-    change slowly with t, higher frequencies (later dims) change rapidly -- this
-    multi-scale encoding helps the model distinguish nearby timesteps.
+    왜 sinusoidal인가: 인접한 step 간 부드러운 보간과 함께 각 timestep에 대한
+    고유한 표현을 제공함. 저주파 성분(초기 차원)은 t에 따라 천천히 변하고,
+    고주파(후기 차원)는 빠르게 변함 -- 이 multi-scale encoding이
+    모델이 인접한 timestep을 구별하는 데 도움이 됨.
 
-    Same embedding used for positional encoding in Transformers (Vaswani et al., 2017).
+    Transformer의 positional encoding과 동일한 embedding임 (Vaswani et al., 2017).
     """
     embedding = []
     for i in range(dim // 2):
@@ -145,11 +143,10 @@ def relu(x: float) -> float:
 
 
 def initialize_weights(input_dim: int, output_dim: int) -> list[list[float]]:
-    """Initialize weight matrix with Xavier/Glorot uniform initialization.
+    """Xavier/Glorot uniform initialization으로 weight 행렬을 초기화함.
 
-    Scale = sqrt(6 / (input_dim + output_dim)) ensures variance is approximately
-    preserved through layers, preventing gradients from vanishing or exploding
-    during early training.
+    Scale = sqrt(6 / (input_dim + output_dim))으로 레이어를 거쳐도 분산이
+    대략 보존되어, 학습 초기에 gradient가 vanishing하거나 exploding하는 것을 방지함.
     """
     scale = math.sqrt(6.0 / (input_dim + output_dim))
     return [[random.uniform(-scale, scale) for _ in range(output_dim)]
@@ -157,22 +154,22 @@ def initialize_weights(input_dim: int, output_dim: int) -> list[list[float]]:
 
 
 def initialize_bias(dim: int) -> list[float]:
-    """Initialize bias vector to zeros."""
+    """bias 벡터를 0으로 초기화함."""
     return [0.0 for _ in range(dim)]
 
 
 class DenoisingMLP:
-    """Small MLP that predicts noise given (noisy_data, timestep).
+    """(noisy_data, timestep)이 주어지면 noise를 예측하는 소형 MLP.
 
     Architecture:
-        Input: [x_noisy (2D), t_embedding (TIME_EMB_DIM)] -> concat to (2+TIME_EMB_DIM)D
+        Input: [x_noisy (2D), t_embedding (TIME_EMB_DIM)] -> concat하여 (2+TIME_EMB_DIM)D
         Hidden1: (2+TIME_EMB_DIM) -> HIDDEN_DIM, ReLU
         Hidden2: HIDDEN_DIM -> HIDDEN_DIM, ReLU
-        Output: HIDDEN_DIM -> 2 (predicted noise, no activation)
+        Output: HIDDEN_DIM -> 2 (예측된 noise, activation 없음)
 
-    In production diffusion models (Stable Diffusion), this MLP is replaced by a
-    U-Net with billions of parameters, attention layers, and skip connections.
-    But the training objective is identical: given x_t and t, predict epsilon.
+    프로덕션 diffusion model(Stable Diffusion)에서는 이 MLP가 수십억 파라미터의
+    U-Net(attention layer, skip connection 포함)으로 대체됨.
+    하지만 학습 목표는 동일함: x_t와 t가 주어지면 epsilon을 예측함.
     """
 
     def __init__(self):
@@ -190,7 +187,7 @@ class DenoisingMLP:
         self.w3 = initialize_weights(HIDDEN_DIM, 2)
         self.b3 = initialize_bias(2)
 
-        # Adam optimizer state (first and second moments)
+        # Adam optimizer 상태 (first moment, second moment)
         self.m = {'w1': [[0.0]*HIDDEN_DIM for _ in range(input_dim)],
                   'b1': [0.0]*HIDDEN_DIM,
                   'w2': [[0.0]*HIDDEN_DIM for _ in range(HIDDEN_DIM)],
@@ -205,14 +202,14 @@ class DenoisingMLP:
                   'w3': [[0.0]*2 for _ in range(HIDDEN_DIM)],
                   'b3': [0.0]*2}
 
-        self.step = 0  # Adam timestep counter
+        self.step = 0  # Adam timestep 카운터
 
     def forward(self, x_noisy: tuple[float, float], t: int) -> tuple[float, float]:
-        """Forward pass: (noisy_point, timestep) -> predicted_noise.
+        """Forward pass: (noisy point, timestep) -> predicted noise.
 
-        Returns the intermediate activations for backprop.
+        backprop을 위한 중간 activation을 반환함.
         """
-        # Concatenate noisy data and timestep embedding
+        # noisy 데이터와 timestep embedding을 concat함
         t_emb = sinusoidal_embedding(t, TIME_EMB_DIM)
         input_vec = [x_noisy[0], x_noisy[1]] + t_emb
 
@@ -226,11 +223,11 @@ class DenoisingMLP:
               for j in range(HIDDEN_DIM)]
         h2_relu = [relu(h) for h in h2]
 
-        # Layer 3 (output, no activation)
+        # Layer 3 (output, activation 없음)
         output = [sum(h2_relu[i] * self.w3[i][j] for i in range(HIDDEN_DIM)) + self.b3[j]
                   for j in range(2)]
 
-        # Cache for backprop
+        # backprop용 cache
         self.cache = {
             'input': input_vec,
             'h1': h1,
@@ -243,51 +240,50 @@ class DenoisingMLP:
         return tuple(output)
 
     def backward_and_update(self, grad_output: tuple[float, float], lr: float):
-        """Backpropagate MSE gradient and update weights with Adam.
+        """MSE gradient를 backprop하고 Adam으로 weight를 업데이트함.
 
-        Manual gradient computation through all layers. In production, this is
-        handled by autograd frameworks (PyTorch, JAX), but implementing it manually
-        reveals the mechanics.
+        모든 레이어를 통한 수동 gradient 계산. 프로덕션에서는 autograd 프레임워크
+        (PyTorch, JAX)가 처리하지만, 수동으로 구현하면 메커니즘이 드러남.
         """
-        # Gradient at output layer
+        # output layer에서의 gradient
         grad_out = list(grad_output)
 
-        # Backprop through layer 3 (linear, no activation)
+        # layer 3을 통한 backprop (linear, activation 없음)
         grad_w3 = [[self.cache['h2_relu'][i] * grad_out[j] for j in range(2)]
                    for i in range(HIDDEN_DIM)]
         grad_b3 = grad_out
         grad_h2_relu = [sum(self.w3[i][j] * grad_out[j] for j in range(2))
                         for i in range(HIDDEN_DIM)]
 
-        # Backprop through ReLU (derivative is 0 if input <= 0, else 1)
+        # ReLU를 통한 backprop (입력 <= 0이면 미분값 0, 아니면 1)
         grad_h2 = [grad_h2_relu[i] if self.cache['h2'][i] > 0 else 0.0
                    for i in range(HIDDEN_DIM)]
 
-        # Backprop through layer 2
+        # layer 2를 통한 backprop
         grad_w2 = [[self.cache['h1_relu'][i] * grad_h2[j] for j in range(HIDDEN_DIM)]
                    for i in range(HIDDEN_DIM)]
         grad_b2 = grad_h2
         grad_h1_relu = [sum(self.w2[i][j] * grad_h2[j] for j in range(HIDDEN_DIM))
                         for i in range(HIDDEN_DIM)]
 
-        # Backprop through ReLU
+        # ReLU를 통한 backprop
         grad_h1 = [grad_h1_relu[i] if self.cache['h1'][i] > 0 else 0.0
                    for i in range(HIDDEN_DIM)]
 
-        # Backprop through layer 1
+        # layer 1을 통한 backprop
         input_dim = len(self.cache['input'])
         grad_w1 = [[self.cache['input'][i] * grad_h1[j] for j in range(HIDDEN_DIM)]
                    for i in range(input_dim)]
         grad_b1 = grad_h1
 
-        # Adam update
+        # Adam 업데이트
         self.step += 1
         beta1, beta2, eps = 0.9, 0.999, 1e-8
 
-        # Update each parameter with Adam
+        # 각 파라미터를 Adam으로 업데이트함
         def adam_update(param, grad, m, v):
-            """Apply Adam update rule to a single parameter array."""
-            # First moment (exponential moving average of gradients)
+            """단일 파라미터 배열에 Adam 업데이트 규칙을 적용함."""
+            # First moment (gradient의 지수 이동 평균)
             for i in range(len(param)):
                 if isinstance(param[i], list):
                     for j in range(len(param[i])):
@@ -317,27 +313,27 @@ def add_noise(x0: tuple[float, float], t: int,
               sqrt_alpha_bars: list[float],
               sqrt_one_minus_alpha_bars: list[float]) -> tuple[tuple[float, float],
                                                                 tuple[float, float]]:
-    """Add noise to clean data point x0 at timestep t.
+    """clean 데이터 포인트 x0에 timestep t에서 noise를 추가함.
 
     Math-to-code mapping:
         q(x_t | x_0) = N(x_t; sqrt(alpha_bar_t) * x_0, (1 - alpha_bar_t) * I)
         x_t = sqrt(alpha_bar_t) * x_0 + sqrt(1 - alpha_bar_t) * epsilon
 
-    Where epsilon ~ N(0, I) is the noise we sample.
+    epsilon ~ N(0, I)는 샘플링하는 noise임.
 
-    Why this formula works: the forward process is a Markov chain that gradually
-    converts any data distribution into a standard Gaussian. After T steps,
-    x_T ≈ N(0, I) regardless of x_0. The sqrt coefficients ensure variance is
-    preserved: Var(x_t) = alpha_bar_t + (1 - alpha_bar_t) = 1.
+    왜 이 수식이 동작하는가: forward process는 어떤 데이터 분포든 표준 Gaussian으로
+    점진적으로 변환하는 Markov chain임. T step 후,
+    x_T ≈ N(0, I)이며 x_0에 무관함. sqrt 계수가 분산을 보존함:
+    Var(x_t) = alpha_bar_t + (1 - alpha_bar_t) = 1.
 
     Returns:
-        x_t: noised data point
-        epsilon: the noise that was added (ground truth for training)
+        x_t: noise가 추가된 데이터 포인트
+        epsilon: 추가된 noise (학습의 ground truth)
     """
-    # Sample noise from standard Gaussian
+    # 표준 Gaussian에서 noise를 샘플링함
     epsilon = (random.gauss(0, 1), random.gauss(0, 1))
 
-    # Apply closed-form noising formula
+    # closed-form noising 수식을 적용함
     coeff_signal = sqrt_alpha_bars[t]
     coeff_noise = sqrt_one_minus_alpha_bars[t]
 
@@ -353,53 +349,53 @@ def train(data: list[tuple[float, float]], model: DenoisingMLP,
           betas: list[float], alphas: list[float], alpha_bars: list[float],
           sqrt_alpha_bars: list[float], sqrt_one_minus_alpha_bars: list[float],
           num_epochs: int, lr: float):
-    """Train the denoising model to predict noise.
+    """noise를 예측하도록 denoising 모델을 학습함.
 
-    Training loop:
-        1. Sample random data point x_0 from training set
-        2. Sample random timestep t from [0, T-1]
-        3. Sample noise epsilon ~ N(0, I)
-        4. Compute x_t = sqrt(alpha_bar_t) * x_0 + sqrt(1 - alpha_bar_t) * epsilon
-        5. Predict epsilon_pred = model(x_t, t)
+    학습 루프:
+        1. 학습 세트에서 랜덤 데이터 포인트 x_0를 샘플링함
+        2. [0, T-1]에서 랜덤 timestep t를 샘플링함
+        3. noise epsilon ~ N(0, I)를 샘플링함
+        4. x_t = sqrt(alpha_bar_t) * x_0 + sqrt(1 - alpha_bar_t) * epsilon을 계산함
+        5. epsilon_pred = model(x_t, t)로 예측함
         6. Loss = MSE(epsilon_pred, epsilon)
-        7. Backprop and update weights
+        7. Backprop하고 weight를 업데이트함
 
-    Why predict noise instead of clean data: empirically, predicting the noise
-    epsilon is easier to learn than predicting x_0. Intuitively, the noise is
-    simpler (zero-mean Gaussian) than the data (complex spiral structure).
+    왜 clean 데이터 대신 noise를 예측하는가: 경험적으로 noise epsilon을 예측하는 것이
+    x_0를 예측하는 것보다 학습하기 쉬움. 직관적으로, noise가 데이터(복잡한 spiral 구조)보다
+    더 단순함 (zero-mean Gaussian).
 
-    Why MSE loss: the variational lower bound derivation of DDPM (Ho et al., 2020)
-    shows that minimizing KL divergence between learned and true reverse process
-    reduces to MSE between predicted and actual noise. The MSE is the correct
-    loss for maximum likelihood training.
+    왜 MSE loss인가: DDPM의 variational lower bound 유도 (Ho et al., 2020)에서
+    학습된 reverse process와 true reverse process 간의 KL divergence를 최소화하면
+    예측된 noise와 실제 noise 간의 MSE로 귀결됨. MSE가 maximum likelihood 학습을 위한
+    올바른 loss임.
     """
     print(f"Training for {num_epochs} epochs...")
 
     for epoch in range(num_epochs):
-        # Random training sample
+        # 랜덤 학습 sample
         x0 = random.choice(data)
 
-        # Random timestep (0 to T-1)
+        # 랜덤 timestep (0부터 T-1)
         t = random.randint(0, T - 1)
 
-        # Add noise using forward process
+        # forward process로 noise를 추가함
         x_t, epsilon_true = add_noise(x0, t, sqrt_alpha_bars, sqrt_one_minus_alpha_bars)
 
-        # Predict noise
+        # noise를 예측함
         epsilon_pred = model.forward(x_t, t)
 
         # MSE loss
         loss = ((epsilon_pred[0] - epsilon_true[0]) ** 2 +
                 (epsilon_pred[1] - epsilon_true[1]) ** 2) / 2
 
-        # Gradient of MSE: d/d(pred) [(pred - true)^2 / 2] = (pred - true)
+        # MSE의 gradient: d/d(pred) [(pred - true)^2 / 2] = (pred - true)
         grad_loss = (epsilon_pred[0] - epsilon_true[0],
                      epsilon_pred[1] - epsilon_true[1])
 
-        # Backprop and update
+        # Backprop 및 업데이트
         model.backward_and_update(grad_loss, lr)
 
-        # Print progress
+        # 진행 상황 출력
         if (epoch + 1) % 500 == 0 or epoch == 0:
             print(f"  Epoch {epoch + 1:>5}/{num_epochs}  Loss: {loss:.6f}")
 
@@ -408,41 +404,41 @@ def train(data: list[tuple[float, float]], model: DenoisingMLP,
 
 def sample(model: DenoisingMLP, betas: list[float], alphas: list[float],
            alpha_bars: list[float]) -> tuple[float, float]:
-    """Generate a new 2D point by iteratively denoising pure noise.
+    """순수 noise를 반복적으로 denoising하여 새로운 2D 포인트를 생성함.
 
     Reverse process (sampling):
-        Start with x_T ~ N(0, I)
-        For t = T-1, T-2, ..., 0:
+        x_T ~ N(0, I)에서 시작
+        t = T-1, T-2, ..., 0에 대해:
             epsilon_pred = model(x_t, t)
             x_{t-1} = (1 / sqrt(alpha_t)) * (x_t - (beta_t / sqrt(1 - alpha_bar_t)) * epsilon_pred)
                       + sigma_t * z
-            where z ~ N(0, I) for t > 0, z = 0 for t = 0
+            여기서 t > 0이면 z ~ N(0, I), t = 0이면 z = 0
 
-    Math-to-code mapping (from DDPM paper, Equation 11):
+    Math-to-code mapping (DDPM 논문, Equation 11):
         mean = (1 / sqrt(alpha_t)) * (x_t - (beta_t / sqrt(1 - alpha_bar_t)) * epsilon_pred)
-        variance = sigma_t^2 = beta_t (simplified; see signpost below)
+        variance = sigma_t^2 = beta_t (간소화; 아래 signpost 참조)
         x_{t-1} ~ N(mean, variance)
 
-    Signpost: the full DDPM reverse variance is more complex (interpolates between
-    beta_t and a different formula). We use sigma_t = sqrt(beta_t) for simplicity.
-    This produces slightly higher variance samples but preserves the core algorithm.
+    Signpost: 전체 DDPM reverse variance는 더 복잡함 (beta_t와 다른 수식 사이를
+    보간함). 여기서는 단순화를 위해 sigma_t = sqrt(beta_t)를 사용함.
+    약간 더 높은 분산의 sample이 생성되지만 핵심 알고리즘은 보존됨.
     """
-    # Start from pure noise
+    # 순수 noise에서 시작함
     x = (random.gauss(0, 1), random.gauss(0, 1))
 
-    # Iteratively denoise from t = T-1 down to t = 0
+    # t = T-1부터 t = 0까지 반복적으로 denoise함
     for t in range(T - 1, -1, -1):
-        # Predict noise at current timestep
+        # 현재 timestep에서 noise를 예측함
         epsilon_pred = model.forward(x, t)
 
-        # Compute mean of p(x_{t-1} | x_t)
+        # p(x_{t-1} | x_t)의 평균을 계산함
         coeff = 1.0 / math.sqrt(alphas[t])
         noise_coeff = betas[t] / math.sqrt(1.0 - alpha_bars[t])
 
         mean_x = coeff * (x[0] - noise_coeff * epsilon_pred[0])
         mean_y = coeff * (x[1] - noise_coeff * epsilon_pred[1])
 
-        # Add noise (except at t=0, final step is deterministic)
+        # noise를 추가함 (t=0에서는 제외, 마지막 step은 결정적임)
         if t > 0:
             sigma = math.sqrt(betas[t])
             z = (random.gauss(0, 1), random.gauss(0, 1))
@@ -456,7 +452,7 @@ def sample(model: DenoisingMLP, betas: list[float], alphas: list[float],
 # === STATISTICS ===
 
 def compute_statistics(points: list[tuple[float, float]]) -> dict[str, float]:
-    """Compute mean and standard deviation of 2D point cloud."""
+    """2D point cloud의 평균과 표준편차를 계산함."""
     n = len(points)
 
     mean_x = sum(p[0] for p in points) / n
@@ -484,7 +480,7 @@ if __name__ == "__main__":
     print("=" * 70)
     print()
 
-    # Generate training data
+    # 학습 데이터 생성
     print("Generating training data...")
     data = generate_spiral(NUM_SAMPLES)
     train_stats = compute_statistics(data)
@@ -493,7 +489,7 @@ if __name__ == "__main__":
     print(f"  Std:  ({train_stats['std_x']:.4f}, {train_stats['std_y']:.4f})")
     print()
 
-    # Precompute noise schedule
+    # noise schedule을 미리 계산함
     print("Computing noise schedule...")
     betas, alphas, alpha_bars, sqrt_alpha_bars, sqrt_one_minus_alpha_bars = \
         compute_noise_schedule(T, BETA_START, BETA_END)
@@ -502,19 +498,19 @@ if __name__ == "__main__":
     print(f"  Alpha_bar at T-1: {alpha_bars[-1]:.6f}")
     print()
 
-    # Initialize model
+    # 모델 초기화
     print("Initializing denoising model...")
     model = DenoisingMLP()
     print(f"  Architecture: (2+{TIME_EMB_DIM}) -> {HIDDEN_DIM} -> {HIDDEN_DIM} -> 2")
     print(f"  Parameters: ~{(2 + TIME_EMB_DIM) * HIDDEN_DIM + HIDDEN_DIM * HIDDEN_DIM + HIDDEN_DIM * 2}")
     print()
 
-    # Train
+    # 학습
     train(data, model, betas, alphas, alpha_bars, sqrt_alpha_bars,
           sqrt_one_minus_alpha_bars, NUM_EPOCHS, LEARNING_RATE)
     print()
 
-    # Generate samples
+    # sample 생성
     print(f"Generating {NUM_GENERATED} samples from trained model...")
     generated = [sample(model, betas, alphas, alpha_bars)
                  for _ in range(NUM_GENERATED)]
@@ -524,7 +520,7 @@ if __name__ == "__main__":
     print(f"  Std:  ({gen_stats['std_x']:.4f}, {gen_stats['std_y']:.4f})")
     print()
 
-    # Compare distributions
+    # 분포 비교
     print("Distribution comparison:")
     print(f"  Training mean: ({train_stats['mean_x']:.4f}, {train_stats['mean_y']:.4f})")
     print(f"  Generated mean: ({gen_stats['mean_x']:.4f}, {gen_stats['mean_y']:.4f})")
@@ -533,10 +529,10 @@ if __name__ == "__main__":
     print(f"  Generated std: ({gen_stats['std_x']:.4f}, {gen_stats['std_y']:.4f})")
     print()
 
-    # Quality metrics: compare generated vs training distributions
-    # For means: use absolute difference normalized by training std (z-score)
-    # because percentage difference is unstable when the mean is near zero.
-    # For stds: percentage difference is appropriate since std is always positive.
+    # 품질 지표: 생성된 분포 vs 학습 분포 비교
+    # 평균: 학습 std로 정규화한 절대 차이 (z-score)를 사용함.
+    # 평균이 0 근처일 때 백분율 차이가 불안정하기 때문임.
+    # 표준편차: std는 항상 양수이므로 백분율 차이가 적절함.
     mean_x_zscore = abs(gen_stats['mean_x'] - train_stats['mean_x']) / train_stats['std_x']
     mean_y_zscore = abs(gen_stats['mean_y'] - train_stats['mean_y']) / train_stats['std_y']
     std_x_diff = abs(gen_stats['std_x'] - train_stats['std_x']) / train_stats['std_x'] * 100
@@ -547,7 +543,7 @@ if __name__ == "__main__":
     print(f"  Std deviation difference:   X={std_x_diff:.1f}%  Y={std_y_diff:.1f}%")
     print()
 
-    # Success: mean shift < 0.5σ and std within 20%
+    # 성공 기준: mean shift < 0.5σ이고 std 차이 20% 이내
     success = mean_x_zscore < 0.5 and mean_y_zscore < 0.5 and std_x_diff < 20 and std_y_diff < 20
     if success:
         print("SUCCESS: Generated distribution matches training distribution.")

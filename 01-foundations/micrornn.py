@@ -1,11 +1,11 @@
 """
-Before attention conquered everything -- how sequences were modeled with recurrence, and why
-gating was the breakthrough that made RNNs actually work.
+attention이 모든 걸 지배하기 전 -- 시퀀스를 recurrence로 모델링하던 방식과,
+gating이 RNN을 실제로 작동하게 만든 돌파구였던 이유.
 """
 # Reference: Vanilla RNN dates to the 1980s (Rumelhart et al.). GRU (Gated Recurrent Unit)
 # introduced by Cho et al., "Learning Phrase Representations using RNN Encoder-Decoder for
-# Statistical Machine Translation" (2014). This implementation demonstrates both side-by-side
-# on the same character-level language modeling task to show why gating matters.
+# Statistical Machine Translation" (2014). 이 구현은 같은 character-level 언어 모델링 태스크에서
+# 둘을 나란히 비교해서 gating이 왜 중요한지 보여줌.
 
 from __future__ import annotations
 
@@ -19,25 +19,24 @@ random.seed(42)
 
 # === CONSTANTS AND HYPERPARAMETERS ===
 
-N_HIDDEN = 32       # hidden state dimension (compact for 7-minute runtime)
-SEQ_LEN = 16        # maximum sequence length
-LEARNING_RATE = 0.1   # SGD learning rate — 10x higher than microgpt's Adam because plain
-                      # SGD needs much larger steps to compensate for lack of adaptive rates
-NUM_STEPS = 3000    # training steps per model (3000 vanilla RNN, 3000 GRU)
-TRAIN_SIZE = 200    # small training subset so each name is seen ~15x in 3000 steps
+N_HIDDEN = 32       # hidden state 차원 (7분 런타임에 맞춘 소형 크기)
+SEQ_LEN = 16        # 최대 시퀀스 길이
+LEARNING_RATE = 0.1   # SGD learning rate — microgpt의 Adam보다 10배 높음. plain
+                      # SGD는 adaptive rate가 없어서 훨씬 큰 step이 필요함
+NUM_STEPS = 3000    # 모델당 학습 스텝 수 (vanilla RNN 3000, GRU 3000)
+TRAIN_SIZE = 200    # 작은 학습 서브셋으로 3000 스텝 동안 각 이름이 ~15번 보임
 
 DATA_URL = "https://raw.githubusercontent.com/karpathy/makemore/master/names.txt"
 DATA_FILE = "names.txt"
 
-# Signpost: ~800 parameters per model (vanilla RNN and GRU have similar sizes).
-# Production RNNs had millions. The architecture is correct; this is a toy scale
-# for pedagogical clarity.
+# 참고: 모델당 ~800개 파라미터 (vanilla RNN과 GRU는 비슷한 크기임).
+# 프로덕션 RNN은 수백만 개였음. 아키텍처는 정확하고, 이건 교육용 toy scale임.
 
 
 # === DATA LOADING ===
 
 def load_data(url: str, filename: str) -> list[str]:
-    """Download and parse the training corpus."""
+    """학습 코퍼스를 다운로드하고 파싱함."""
     if not os.path.exists(filename):
         print(f"Downloading {filename}...")
         urllib.request.urlretrieve(url, filename)
@@ -51,22 +50,22 @@ def load_data(url: str, filename: str) -> list[str]:
 # === SCALAR AUTOGRAD ENGINE ===
 
 class Value:
-    """A scalar value with reverse-mode automatic differentiation.
+    """reverse-mode 자동 미분을 지원하는 스칼라 값.
 
-    Tracks computational history via ._children and ._local_grads, enabling
-    gradient computation through the chain rule. Every forward operation stores
-    its local derivative (∂out/∂input) as a closure, then backward() replays
-    the computation graph in reverse topological order, accumulating gradients.
+    ._children와 ._local_grads를 통해 연산 이력을 추적하여 chain rule로
+    gradient를 계산함. 모든 forward 연산은 로컬 도함수(∂out/∂input)를 클로저로
+    저장하고, backward()가 연산 그래프를 역방향 위상 정렬 순서로 재생하면서
+    gradient를 누적함.
     """
     __slots__ = ('data', 'grad', '_children', '_local_grads')
 
     def __init__(self, data, children=(), local_grads=()):
-        self.data = data          # scalar float value
-        self.grad = 0.0           # accumulated gradient (∂Loss/∂self)
-        self._children = children # parent Values in the computation graph
-        self._local_grads = local_grads  # ∂self/∂child for each child
+        self.data = data          # 스칼라 float 값
+        self.grad = 0.0           # 누적된 gradient (∂Loss/∂self)
+        self._children = children # 연산 그래프에서의 부모 Value들
+        self._local_grads = local_grads  # 각 child에 대한 ∂self/∂child
 
-    # Arithmetic operations
+    # 산술 연산
     def __add__(self, other):
         other = other if isinstance(other, Value) else Value(other)
         # d(a+b)/da = 1, d(a+b)/db = 1
@@ -102,7 +101,7 @@ class Value:
     def __rtruediv__(self, other):
         return other * (self ** -1)
 
-    # Activation functions
+    # 활성화 함수
     def tanh(self):
         # d(tanh(x))/dx = 1 - tanh(x)^2
         t = math.tanh(self.data)
@@ -111,9 +110,9 @@ class Value:
     def sigmoid(self):
         # sigmoid(x) = 1 / (1 + exp(-x))
         # d(sigmoid(x))/dx = sigmoid(x) * (1 - sigmoid(x))
-        # This is the gating activation for GRUs: values in [0,1] act as "forget"
-        # and "update" weights. When sigmoid(x) ≈ 0, the gate blocks information;
-        # when ≈ 1, the gate passes information through.
+        # GRU의 gating 활성화 함수: [0,1] 범위의 값이 "forget"과 "update" 가중치 역할을 함.
+        # sigmoid(x) ≈ 0이면 gate가 정보를 차단하고,
+        # ≈ 1이면 gate가 정보를 통과시킴.
         s = 1.0 / (1.0 + math.exp(-self.data))
         return Value(s, (self,), (s * (1 - s),))
 
@@ -124,7 +123,7 @@ class Value:
 
     def log(self):
         # d(log(x))/dx = 1/x
-        # We assume input is already clamped (see safe_log below)
+        # 입력이 이미 클램핑되었다고 가정함 (아래 safe_log 참조)
         return Value(math.log(self.data), (self,), (1 / self.data,))
 
     def relu(self):
@@ -132,12 +131,11 @@ class Value:
         return Value(max(0, self.data), (self,), (float(self.data > 0),))
 
     def backward(self):
-        """Compute gradients via reverse-mode automatic differentiation.
+        """reverse-mode 자동 미분으로 gradient를 계산함.
 
-        Builds a topological ordering of the computation graph, then propagates
-        gradients backward using the chain rule. For a composite function
-        f(g(h(x))), the chain rule says df/dx = (df/dg) * (dg/dh) * (dh/dx).
-        The topological sort ensures we compute df/dg before we need it for df/dh.
+        연산 그래프의 위상 정렬을 만들고, chain rule로 gradient를 역전파함.
+        합성 함수 f(g(h(x)))에서 chain rule은 df/dx = (df/dg) * (dg/dh) * (dh/dx)임.
+        위상 정렬이 df/dg를 df/dh에 필요하기 전에 먼저 계산되도록 보장함.
         """
         topo = []
         visited = set()
@@ -151,10 +149,10 @@ class Value:
 
         build_topo(self)
 
-        # Seed: gradient of loss with respect to itself is 1
+        # 시드: loss의 자기 자신에 대한 gradient는 1
         self.grad = 1.0
 
-        # Reverse topological order: gradients flow backward from output to inputs
+        # 역방향 위상 순서: gradient가 출력에서 입력으로 흐름
         for v in reversed(topo):
             for child, local_grad in zip(v._children, v._local_grads):
                 # Chain rule: ∂Loss/∂child += ∂Loss/∂v * ∂v/∂child
@@ -162,32 +160,32 @@ class Value:
 
 
 # --- AUTOGRAD DIFFERENCES IN THIS SCRIPT ---
-# This Value class follows the canonical interface (see docs/autograd-interface.md)
-# with the following addition:
-# - sigmoid(): Required for GRU gating (z_t and r_t computations)
-# Base operations (add, mul, tanh, exp, relu, pow, backward) are identical
-# to the canonical spec.
+# 이 Value 클래스는 표준 인터페이스(docs/autograd-interface.md 참조)를 따르며
+# 다음이 추가됨:
+# - sigmoid(): GRU gating에 필요 (z_t와 r_t 계산)
+# 기본 연산 (add, mul, tanh, exp, relu, pow, backward)은
+# 표준 스펙과 동일함.
 
 
 # === PARAMETER INITIALIZATION ===
 
 def make_matrix(nrows: int, ncols: int, std: float = 0.08) -> list[list[Value]]:
-    """Initialize a weight matrix with Gaussian noise.
+    """가우시안 노이즈로 가중치 행렬을 초기화함.
 
-    Standard deviation of 0.08 is chosen empirically for this tiny model.
-    Larger models typically use std = 1/sqrt(d_in) (Xavier/Glorot initialization).
+    표준편차 0.08은 이 소형 모델에 맞게 경험적으로 선택됨.
+    더 큰 모델은 보통 std = 1/sqrt(d_in) (Xavier/Glorot 초기화)을 사용함.
     """
     return [[Value(random.gauss(0, std)) for _ in range(ncols)] for _ in range(nrows)]
 
 
 def init_vanilla_rnn_params():
-    """Initialize parameters for vanilla RNN.
+    """vanilla RNN 파라미터를 초기화함.
 
-    Vanilla RNN update rule:
+    Vanilla RNN 업데이트 규칙:
         h_t = tanh(W_xh @ x_t + W_hh @ h_{t-1} + b_h)
         y_t = W_hy @ h_t + b_y
 
-    Returns state_dict with weight matrices.
+    가중치 행렬이 담긴 state_dict를 반환함.
     """
     params = {}
     params['W_xh'] = make_matrix(N_HIDDEN, VOCAB_SIZE)  # input-to-hidden
@@ -201,17 +199,16 @@ def init_vanilla_rnn_params():
 
 
 def init_gru_params():
-    """Initialize parameters for GRU.
+    """GRU 파라미터를 초기화함.
 
-    GRU update rules:
+    GRU 업데이트 규칙:
         z_t = sigmoid(W_xz @ x_t + W_hz @ h_{t-1})           # update gate
         r_t = sigmoid(W_xr @ x_t + W_hr @ h_{t-1})           # reset gate
         h_candidate = tanh(W_xh @ x_t + W_hh @ (r_t * h_{t-1}))
-        h_t = (1 - z_t) * h_{t-1} + z_t * h_candidate       # interpolate
+        h_t = (1 - z_t) * h_{t-1} + z_t * h_candidate       # 보간
 
-    The GRU uses 3 weight matrices per gate type (z, r, h), doubling the
-    parameter count vs vanilla RNN, but the gating mechanism is what makes
-    the difference, not the parameter count.
+    GRU는 gate 타입(z, r, h)마다 3개의 가중치 행렬을 써서 vanilla RNN 대비
+    파라미터 수가 두 배지만, 차이를 만드는 건 파라미터 수가 아니라 gating 메커니즘임.
     """
     params = {}
     # Update gate
@@ -222,11 +219,11 @@ def init_gru_params():
     params['W_xr'] = make_matrix(N_HIDDEN, VOCAB_SIZE)
     params['W_hr'] = make_matrix(N_HIDDEN, N_HIDDEN)
 
-    # Candidate hidden state
+    # 후보 hidden state
     params['W_xh'] = make_matrix(N_HIDDEN, VOCAB_SIZE)
     params['W_hh'] = make_matrix(N_HIDDEN, N_HIDDEN)
 
-    # Output projection (shared with vanilla RNN structure)
+    # Output projection (vanilla RNN과 같은 구조)
     params['W_hy'] = make_matrix(VOCAB_SIZE, N_HIDDEN)
     params['b_y'] = [Value(0.0) for _ in range(VOCAB_SIZE)]
 
@@ -236,10 +233,10 @@ def init_gru_params():
 # === CORE OPERATIONS ===
 
 def linear(x: list[Value], w: list[list[Value]], b: list[Value] = None) -> list[Value]:
-    """Matrix-vector multiplication: y = W @ x + b (bias optional).
+    """행렬-벡터 곱: y = W @ x + b (bias는 선택적).
 
-    For weight matrix W with shape [n_out, n_in] and input vector x with
-    shape [n_in], computes output y with shape [n_out].
+    가중치 행렬 W의 shape이 [n_out, n_in]이고 입력 벡터 x의 shape이 [n_in]일 때,
+    shape [n_out]의 출력 y를 계산함.
     """
     y = [sum(w_row[j] * x[j] for j in range(len(x))) for w_row in w]
     if b is not None:
@@ -248,10 +245,10 @@ def linear(x: list[Value], w: list[list[Value]], b: list[Value] = None) -> list[
 
 
 def softmax(logits: list[Value]) -> list[Value]:
-    """Numerically stable softmax: converts logits to probabilities.
+    """수치적으로 안정적인 softmax: logit을 확률로 변환함.
 
-    Softmax is translation-invariant: softmax(x) = softmax(x - c) for any c.
-    We subtract max(x) before exp() to prevent overflow.
+    softmax는 이동 불변임: 임의의 c에 대해 softmax(x) = softmax(x - c).
+    오버플로우 방지를 위해 exp() 전에 max(x)를 뺌.
     """
     max_val = max(v.data for v in logits)
     exp_vals = [(v - max_val).exp() for v in logits]
@@ -260,14 +257,13 @@ def softmax(logits: list[Value]) -> list[Value]:
 
 
 def safe_log(prob: Value) -> Value:
-    """Clipped logarithm for numerical stability in loss computation.
+    """loss 계산에서 수치 안정성을 위한 클리핑된 로그.
 
-    Prevents log(0) which returns -inf and breaks gradient backpropagation.
-    Critical: we must keep `prob` as a child node so gradients flow back through
-    the computation graph.
+    log(0)은 -inf를 반환하고 gradient 역전파를 깨뜨리므로 방지함.
+    중요: gradient가 연산 그래프를 통해 흐르도록 `prob`을 자식 노드로 유지해야 함.
     """
     clamped = max(prob.data, 1e-10)
-    # Build the log node manually with prob as its child, preserving the graph.
+    # 그래프를 보존하면서 prob을 자식으로 갖는 log 노드를 수동으로 생성함.
     return Value(math.log(clamped), (prob,), (1.0 / clamped,))
 
 
@@ -276,26 +272,25 @@ def safe_log(prob: Value) -> Value:
 def vanilla_rnn_forward(
     x: list[Value], h_prev: list[Value], params: dict
 ) -> tuple[list[Value], list[Value]]:
-    """Single-step vanilla RNN forward pass.
+    """단일 스텝 vanilla RNN forward pass.
 
-    Math: h_t = tanh(W_xh @ x_t + W_hh @ h_{t-1} + b_h)
+    수식: h_t = tanh(W_xh @ x_t + W_hh @ h_{t-1} + b_h)
           y_t = W_hy @ h_t + b_y
 
-    The recurrent connection (W_hh @ h_{t-1}) is what makes this "recurrent" --
-    the hidden state carries information from previous timesteps. However,
-    backpropagating through this recurrence causes gradients to be repeatedly
-    multiplied by W_hh, which leads to exponential decay (vanishing gradients)
-    or explosion depending on the spectral radius of W_hh.
+    recurrent 연결(W_hh @ h_{t-1})이 이걸 "recurrent"하게 만드는 것임 --
+    hidden state가 이전 타임스텝의 정보를 전달함. 하지만 이 recurrence를 통한
+    역전파에서 gradient가 W_hh에 반복 곱해지면서 W_hh의 spectral radius에 따라
+    지수적 감소(vanishing gradient)나 폭발이 발생함.
 
-    Returns: (logits, new_hidden_state)
+    반환: (logits, new_hidden_state)
     """
-    # Compute new hidden state
+    # 새로운 hidden state 계산
     h_input = linear(x, params['W_xh'])
     h_recurrent = linear(h_prev, params['W_hh'])
     h_combined = [h_i + h_r + params['b_h'][i] for i, (h_i, h_r) in enumerate(zip(h_input, h_recurrent))]
     h = [h_i.tanh() for h_i in h_combined]
 
-    # Compute output logits
+    # 출력 logit 계산
     logits = linear(h, params['W_hy'], params['b_y'])
 
     return logits, h
@@ -306,52 +301,50 @@ def vanilla_rnn_forward(
 def gru_forward(
     x: list[Value], h_prev: list[Value], params: dict
 ) -> tuple[list[Value], list[Value]]:
-    """Single-step GRU forward pass.
+    """단일 스텝 GRU forward pass.
 
-    Math:
+    수식:
         z_t = sigmoid(W_xz @ x_t + W_hz @ h_{t-1})           # update gate
         r_t = sigmoid(W_xr @ x_t + W_hr @ h_{t-1})           # reset gate
         h_candidate = tanh(W_xh @ x_t + W_hh @ (r_t * h_{t-1}))
         h_t = (1 - z_t) * h_{t-1} + z_t * h_candidate
 
-    The update gate z_t acts as a "gradient highway": when z_t ≈ 0, h_t = h_{t-1}
-    (we keep the old hidden state), so dh_t/dh_{t-1} = 1. This identity gradient
-    flow prevents vanishing gradients -- the derivative doesn't get multiplied by
-    weight matrices, it just passes through. This is the core insight of gating.
+    update gate z_t는 "gradient 고속도로" 역할을 함: z_t ≈ 0이면 h_t = h_{t-1}
+    (이전 hidden state를 유지)이므로 dh_t/dh_{t-1} = 1임. 이 항등 gradient 흐름이
+    vanishing gradient를 방지함 -- 도함수가 가중치 행렬에 곱해지지 않고 그냥
+    통과함. 이것이 gating의 핵심 아이디어임.
 
-    The reset gate r_t controls how much past information is used when computing
-    the candidate hidden state. When r_t ≈ 0, the network ignores h_{t-1} and
-    starts fresh from the input x_t.
+    reset gate r_t는 후보 hidden state를 계산할 때 과거 정보를 얼마나 사용할지
+    제어함. r_t ≈ 0이면 네트워크가 h_{t-1}을 무시하고 입력 x_t에서 새로 시작함.
 
-    Returns: (logits, new_hidden_state)
+    반환: (logits, new_hidden_state)
     """
-    # Update gate: controls how much of the new state vs old state to use
+    # Update gate: 새 state 대 이전 state의 비율을 제어함
     z_input = linear(x, params['W_xz'])
     z_recurrent = linear(h_prev, params['W_hz'])
     z = [(z_i + z_r).sigmoid() for z_i, z_r in zip(z_input, z_recurrent)]
 
-    # Reset gate: controls how much of the previous state to use for candidate
+    # Reset gate: 후보를 위해 이전 state를 얼마나 사용할지 제어함
     r_input = linear(x, params['W_xr'])
     r_recurrent = linear(h_prev, params['W_hr'])
     r = [(r_i + r_r).sigmoid() for r_i, r_r in zip(r_input, r_recurrent)]
 
-    # Candidate hidden state: computed using reset-gated previous state
-    # The element-wise multiplication (r_t * h_{t-1}) "resets" components of the
-    # hidden state that are irrelevant for the current input.
+    # 후보 hidden state: reset-gated된 이전 state로 계산됨
+    # 원소별 곱셈(r_t * h_{t-1})이 현재 입력과 무관한 hidden state 성분을 "리셋"함.
     h_input = linear(x, params['W_xh'])
     h_reset = [r_i * h_i for r_i, h_i in zip(r, h_prev)]
     h_recurrent = linear(h_reset, params['W_hh'])
     h_candidate = [(h_i + h_r).tanh() for h_i, h_r in zip(h_input, h_recurrent)]
 
-    # Interpolate between old state and candidate: z_t controls the blend
-    # When z_t = 0: h_t = h_{t-1} (keep old state, "forget" new input)
-    # When z_t = 1: h_t = h_candidate (fully update with new input)
-    # This linear interpolation creates the gradient highway: dh_t/dh_{t-1}
-    # includes a (1 - z_t) term that bypasses the weight matrices.
+    # 이전 state와 후보를 보간함: z_t가 블렌딩을 제어함
+    # z_t = 0이면: h_t = h_{t-1} (이전 state 유지, 새 입력을 "잊음")
+    # z_t = 1이면: h_t = h_candidate (새 입력으로 완전히 업데이트)
+    # 이 선형 보간이 gradient 고속도로를 만듦: dh_t/dh_{t-1}에
+    # 가중치 행렬을 우회하는 (1 - z_t) 항이 포함됨.
     h = [(1 - z_i) * h_prev_i + z_i * h_cand_i
          for z_i, h_prev_i, h_cand_i in zip(z, h_prev, h_candidate)]
 
-    # Compute output logits
+    # 출력 logit 계산
     logits = linear(h, params['W_hy'], params['b_y'])
 
     return logits, h
@@ -366,14 +359,14 @@ def train_rnn(
     params: dict,
     model_name: str
 ) -> tuple[float, list[float]]:
-    """Train an RNN model (vanilla or GRU) and track gradient norms.
+    """RNN 모델(vanilla 또는 GRU)을 학습하고 gradient norm을 추적함.
 
     Args:
-        docs: Training documents (names)
-        unique_chars: Vocabulary (character list)
-        forward_fn: vanilla_rnn_forward or gru_forward
-        params: Model parameters (state_dict)
-        model_name: "Vanilla RNN" or "GRU" (for logging)
+        docs: 학습 문서 (이름들)
+        unique_chars: 어휘 (문자 리스트)
+        forward_fn: vanilla_rnn_forward 또는 gru_forward
+        params: 모델 파라미터 (state_dict)
+        model_name: "Vanilla RNN" 또는 "GRU" (로깅용)
 
     Returns:
         (final_loss, gradient_norms_per_timestep)
@@ -381,7 +374,7 @@ def train_rnn(
     BOS = len(unique_chars)
     VOCAB_SIZE_LOCAL = len(unique_chars) + 1
 
-    # Flatten all parameters into a single list for optimizer
+    # 모든 파라미터를 옵티마이저용 단일 리스트로 평탄화
     param_list = []
     for key, val in params.items():
         if isinstance(val, list) and isinstance(val[0], Value):
@@ -396,60 +389,60 @@ def train_rnn(
     final_loss_value = 0.0
 
     for step in range(NUM_STEPS):
-        # Cycle through dataset
+        # 데이터셋을 순환하며 사용
         doc = docs[step % len(docs)]
 
-        # Tokenize: [BOS, char_0, char_1, ..., char_n, BOS]
+        # 토큰화: [BOS, char_0, char_1, ..., char_n, BOS]
         tokens = [BOS] + [unique_chars.index(ch) for ch in doc] + [BOS]
 
-        # Truncate to sequence length
+        # 시퀀스 길이로 자름
         seq_len = min(SEQ_LEN, len(tokens) - 1)
 
-        # Initialize hidden state to zeros
+        # hidden state를 0으로 초기화
         h = [Value(0.0) for _ in range(N_HIDDEN)]
 
-        # Forward pass through sequence
+        # 시퀀스를 통한 forward pass
         losses = []
         for pos in range(seq_len):
-            # One-hot encode input token
+            # 입력 토큰을 one-hot 인코딩
             x_onehot = [Value(1.0 if i == tokens[pos] else 0.0) for i in range(VOCAB_SIZE_LOCAL)]
 
-            # Single timestep forward
+            # 단일 타임스텝 forward
             logits, h = forward_fn(x_onehot, h, params)
 
-            # Compute loss
+            # loss 계산
             probs = softmax(logits)
             target = tokens[pos + 1]
             loss_t = -safe_log(probs[target])
             losses.append(loss_t)
 
-        # Average loss over sequence
+        # 시퀀스에 대한 평균 loss
         loss = (1.0 / seq_len) * sum(losses)
 
         # Backward pass (Backpropagation Through Time - BPTT)
         loss.backward()
 
-        # SGD update
+        # SGD 업데이트
         for param in param_list:
             param.data -= LEARNING_RATE * param.grad
             param.grad = 0.0
 
         final_loss_value = loss.data
 
-        # Print progress
+        # 진행 상황 출력
         if (step + 1) % 200 == 0 or step == 0:
             print(f"  step {step + 1:>4}/{NUM_STEPS} | loss: {loss.data:.4f}")
 
     print(f"{model_name} training complete. Final loss: {final_loss_value:.4f}\n")
 
     # === GRADIENT NORM TRACKING ===
-    # Measure gradient norms across a LONG sequence to demonstrate vanishing gradients.
-    # Short names (~6 chars) don't show dramatic gradient decay because there aren't
-    # enough timesteps for exponential decay to accumulate. We concatenate multiple
-    # names to create a sequence of length SEQ_LEN for a clearer demonstration.
+    # vanishing gradient를 보여주기 위해 긴 시퀀스에서 gradient norm을 측정함.
+    # 짧은 이름(~6글자)은 지수적 감쇠가 누적될 타임스텝이 충분하지 않아서
+    # 극적인 gradient 감쇠를 보여주지 못함. 여러 이름을 연결해서
+    # 더 명확한 시연을 위해 길이 SEQ_LEN의 시퀀스를 만듦.
     print(f"Measuring gradient norms for {model_name}...")
 
-    # Build a long token sequence by concatenating names until we reach SEQ_LEN
+    # 이름들을 연결해서 SEQ_LEN에 도달할 때까지 긴 토큰 시퀀스를 만듦
     long_tokens = [BOS]
     for doc in docs:
         long_tokens.extend([unique_chars.index(ch) for ch in doc])
@@ -458,7 +451,7 @@ def train_rnn(
             break
     seq_len = min(SEQ_LEN, len(long_tokens) - 1)
 
-    # Forward pass through the long sequence
+    # 긴 시퀀스를 통한 forward pass
     h = [Value(0.0) for _ in range(N_HIDDEN)]
     hidden_states = []
 
@@ -467,9 +460,9 @@ def train_rnn(
         logits, h = forward_fn(x_onehot, h, params)
         hidden_states.append(h)
 
-    # Compute loss only at the final timestep: gradient must flow ALL the way back
-    # through seq_len timesteps. This is the scenario where vanishing gradients
-    # are most severe — the loss signal must traverse the entire sequence.
+    # 마지막 타임스텝에서만 loss를 계산함: gradient가 seq_len 타임스텝 전체를
+    # 통과해야 함. vanishing gradient가 가장 심한 시나리오 -- loss 신호가
+    # 전체 시퀀스를 횡단해야 함.
     probs = softmax(logits)
     target = long_tokens[seq_len]
     loss = -safe_log(probs[target])
@@ -477,25 +470,25 @@ def train_rnn(
     # Backward pass
     loss.backward()
 
-    # Compute L2 norm of gradient for each hidden state
+    # 각 hidden state의 gradient L2 norm을 계산함
     # ||dL/dh_t|| = sqrt(sum_i (dL/dh_t[i])^2)
-    # For vanilla RNN: expect exponential decay as t decreases (further from loss)
-    # For GRU: expect more uniform norms due to gradient highways through gates
+    # vanilla RNN: t가 감소할수록 (loss에서 멀어질수록) 지수적 감쇠가 예상됨
+    # GRU: gate를 통한 gradient 고속도로 덕분에 더 균일한 norm이 예상됨
     gradient_norms = []
     for h_t in hidden_states:
         norm_sq = sum(h_i.grad ** 2 for h_i in h_t)
         norm = math.sqrt(norm_sq)
         gradient_norms.append(norm)
 
-    # Print gradient norms
+    # gradient norm 출력
     print(f"Gradient norms per timestep (sequence length {seq_len}):")
     for t, norm in enumerate(gradient_norms):
         bar = "#" * min(50, int(norm * 100))
         print(f"  t={t:>2}: ||dL/dh_t|| = {norm:.6f}  {bar}")
 
-    # Compute ratio: first / last (measures how much gradient decays going backward)
-    # < 1 means gradients vanish going backward through time (first < last)
-    # The more this ratio approaches 0, the worse the vanishing gradient problem.
+    # 비율 계산: first / last (gradient가 역방향으로 얼마나 감쇠하는지 측정)
+    # < 1이면 gradient가 시간을 거슬러 역방향으로 가면서 소멸됨 (first < last)
+    # 이 비율이 0에 가까울수록 vanishing gradient 문제가 심각함.
     if gradient_norms[-1] > 1e-10:
         ratio = gradient_norms[0] / gradient_norms[-1]
     else:
@@ -515,7 +508,7 @@ def generate_names(
     num_samples: int = 10,
     model_name: str = "Model"
 ) -> list[str]:
-    """Generate names from a trained RNN model."""
+    """학습된 RNN 모델에서 이름을 생성함."""
     BOS = len(unique_chars)
     VOCAB_SIZE_LOCAL = len(unique_chars) + 1
 
@@ -528,20 +521,20 @@ def generate_names(
         generated = []
 
         for pos in range(SEQ_LEN):
-            # One-hot encode current token
+            # 현재 토큰을 one-hot 인코딩
             x_onehot = [Value(1.0 if i == token_id else 0.0) for i in range(VOCAB_SIZE_LOCAL)]
 
             # Forward
             logits, h = forward_fn(x_onehot, h, params)
 
-            # Sample from probabilities
+            # 확률에서 샘플링
             probs = softmax(logits)
             token_id = random.choices(
                 range(VOCAB_SIZE_LOCAL),
                 weights=[p.data for p in probs]
             )[0]
 
-            # Stop if BOS (end-of-sequence)
+            # BOS(시퀀스 끝)이면 중단
             if token_id == BOS:
                 break
 
@@ -558,17 +551,17 @@ def generate_names(
 # === MAIN ===
 
 if __name__ == "__main__":
-    # -- Load and prepare data --
+    # -- 데이터 로드 및 준비 --
     print("Loading data...")
     all_docs = load_data(DATA_URL, DATA_FILE)
     random.shuffle(all_docs)
 
-    # Use a small training subset so each name is seen multiple times in 500 steps.
-    # With 200 names and 500 steps, each name is seen ~2.5 times — enough to learn
-    # character-level patterns without requiring thousands of gradient steps.
+    # 작은 학습 서브셋을 사용해서 각 이름이 500 스텝 동안 여러 번 보이게 함.
+    # 200개 이름과 500 스텝이면 각 이름이 ~2.5번 보임 — 수천 번의 gradient
+    # 스텝 없이도 character-level 패턴을 학습하기에 충분함.
     docs = all_docs[:TRAIN_SIZE]
 
-    # Build vocabulary from all names (so we don't miss any characters)
+    # 모든 이름에서 어휘를 구축함 (문자를 누락하지 않기 위해)
     unique_chars = sorted(set(''.join(all_docs)))
     BOS = len(unique_chars)
     VOCAB_SIZE = len(unique_chars) + 1
@@ -596,8 +589,8 @@ if __name__ == "__main__":
     print("-" * 70)
     print(f"{'Final Loss':<30} | {vanilla_loss:<15.4f} | {gru_loss:<15.4f}")
 
-    # Gradient norm ratios: first/last measures backward gradient decay
-    # Lower ratio = worse vanishing gradients (gradient decays more going backward)
+    # Gradient norm 비율: first/last로 역방향 gradient 감쇠를 측정함
+    # 낮은 비율 = vanishing gradient가 더 심함 (gradient가 역방향으로 더 많이 감쇠)
     vanilla_ratio = vanilla_grad_norms[0] / vanilla_grad_norms[-1] if vanilla_grad_norms[-1] > 1e-10 else 0.0
     gru_ratio = gru_grad_norms[0] / gru_grad_norms[-1] if gru_grad_norms[-1] > 1e-10 else 0.0
 
@@ -605,7 +598,7 @@ if __name__ == "__main__":
     print(f"{'(first/last, higher=better)':<30} |                 |                ")
     print("-" * 70)
 
-    # Why the difference matters
+    # 차이가 중요한 이유
     print("\nWhy the gradient norm ratio matters:")
     print("  Vanilla RNN: Gradient norms decay exponentially due to repeated")
     print("               multiplication by W_hh. Spectral radius < 1 causes")

@@ -1,48 +1,48 @@
-# Canonical Autograd Interface
+# 표준 Autograd 인터페이스
 
-This document defines the scalar autograd `Value` class interface that all scripts must implement. The interface ensures consistency across the 9 scripts that use scalar automatic differentiation while allowing per-script extensions.
+이 문서는 모든 스크립트가 구현해야 하는 scalar autograd `Value` class 인터페이스를 정의함. 이 인터페이스는 scalar automatic differentiation을 사용하는 9개 스크립트 전반의 일관성을 보장하면서, 스크립트별 확장은 허용함.
 
-## Why This Exists
+## 이 문서가 존재하는 이유
 
-Each script is self-contained (no shared imports), so the `Value` class is reimplemented in every script that needs it. Without a canonical interface:
+각 스크립트는 자기 완결적(공유 import 없음)이므로, `Value` class는 필요한 모든 스크립트에서 재구현됨. 표준 인터페이스가 없으면:
 
-- Implementations drift (one supports `sigmoid`, another doesn't)
-- Numerical stability patterns are applied inconsistently
-- Readers who skip the autograd section in later scripts miss per-script differences
+- 구현이 서로 달라짐 (하나는 `sigmoid`을 지원하는데, 다른 하나는 안 됨)
+- 수치 안정성 패턴이 일관되지 않게 적용됨
+- 이후 스크립트에서 autograd 섹션을 건너뛴 독자가 스크립트별 차이를 놓침
 
-This spec defines the **minimum** interface. Scripts may add operations (documented via the autograd callout pattern below).
+이 스펙은 **최소** 인터페이스를 정의함. 스크립트는 추가 연산을 넣을 수 있음 (아래의 autograd callout 패턴으로 문서화할 것).
 
 ---
 
-## Required Operations
+## 필수 연산
 
-Every `Value` class must support these operations:
+모든 `Value` class는 다음 연산을 지원해야 함:
 
-### Arithmetic
+### 산술 연산
 
-| Operation      | Python Method         | Notes                                             |
-| -------------- | --------------------- | ------------------------------------------------- |
-| Addition       | `__add__`, `__radd__` | `Value + Value`, `Value + float`, `float + Value` |
-| Multiplication | `__mul__`, `__rmul__` | `Value * Value`, `Value * float`, `float * Value` |
-| Negation       | `__neg__`             | `-Value` (implemented as `self * -1`)             |
-| Subtraction    | `__sub__`, `__rsub__` | Via `__add__` and `__neg__`                       |
-| Division       | `__truediv__`         | Via `__mul__` and `__pow__(-1)`                   |
-| Power          | `__pow__`             | `Value ** int` or `Value ** float`                |
+| 연산      | Python 메서드             | 비고                                              |
+| --------- | ------------------------- | ------------------------------------------------- |
+| 덧셈      | `__add__`, `__radd__`     | `Value + Value`, `Value + float`, `float + Value` |
+| 곱셈      | `__mul__`, `__rmul__`     | `Value * Value`, `Value * float`, `float * Value` |
+| 부정      | `__neg__`                 | `-Value` (`self * -1`로 구현)                     |
+| 뺄셈      | `__sub__`, `__rsub__`     | `__add__`와 `__neg__`를 통해 구현                 |
+| 나눗셈    | `__truediv__`             | `__mul__`과 `__pow__(-1)`을 통해 구현             |
+| 거듭제곱  | `__pow__`                 | `Value ** int` 또는 `Value ** float`              |
 
-### Activations
+### 활성화 함수
 
-| Function | Signature              | Backward                                        |
-| -------- | ---------------------- | ----------------------------------------------- |
-| `tanh()` | `self.tanh() -> Value` | `grad * (1 - out**2)`                           |
-| `exp()`  | `self.exp() -> Value`  | `grad * out`                                    |
-| `relu()` | `self.relu() -> Value` | `grad * (1 if self.data > 0 else 0)`            |
-| `log()`  | `self.log() -> Value`  | `grad / self.data` (clamp `self.data >= 1e-10`) |
+| 함수     | 시그니처                 | Backward                                        |
+| -------- | ------------------------ | ----------------------------------------------- |
+| `tanh()` | `self.tanh() -> Value`   | `grad * (1 - out**2)`                           |
+| `exp()`  | `self.exp() -> Value`    | `grad * out`                                    |
+| `relu()` | `self.relu() -> Value`   | `grad * (1 if self.data > 0 else 0)`            |
+| `log()`  | `self.log() -> Value`    | `grad / self.data` (`self.data >= 1e-10`으로 클램프) |
 
 ### Backward Pass
 
 ```python
 def backward(self):
-    """Compute gradients via reverse-mode autodiff (topological sort)."""
+    """역전파 자동미분으로 기울기를 계산함 (위상 정렬)."""
     topo = []
     visited = set()
     def build_topo(v):
@@ -57,40 +57,40 @@ def backward(self):
         v._backward()
 ```
 
-### Gradient Management
+### 기울기 관리
 
 ```python
-# Before each training step, zero all gradients
+# 각 학습 스텝 전에, 모든 기울기를 0으로 초기화
 for p in params:
     p.grad = 0.0
 ```
 
 ---
 
-## Per-Script Extensions
+## 스크립트별 확장
 
-Scripts that need additional operations beyond the base set must:
+기본 세트를 넘어서 추가 연산이 필요한 스크립트는:
 
-1. Implement the extension in the `Value` class
-2. Document it with the autograd callout pattern (see below)
+1. `Value` class에 확장을 구현할 것
+2. 아래의 autograd callout 패턴으로 문서화할 것
 
-### Known Extensions by Script
+### 스크립트별 알려진 확장
 
-| Script           | Additional Operations | Why Needed                                     |
-| ---------------- | --------------------- | ---------------------------------------------- |
-| `microgpt.py`    | (none beyond base)    | Reference implementation of canonical interface |
-| `micrornn.py`    | `sigmoid()`           | GRU gating: `z_t = sigmoid(...)`               |
-| `microlora.py`   | (none beyond base)    | Uses base set                                  |
-| `microdpo.py`    | (none beyond base)    | `log()` is in the base set                     |
-| `microppo.py`    | `clip()`              | PPO ratio clipping                             |
-| `micromoe.py`    | (router only)         | Router uses base set; experts are plain floats |
-| `microkv.py`     | (none beyond base)    | Compact Value class for training only          |
-| `microquant.py`  | (none beyond base)    | Autograd for training; quantization uses floats |
-| `microbeam.py`   | (none beyond base)    | Autograd for training; decoding uses floats    |
+| 스크립트         | 추가 연산               | 필요한 이유                                      |
+| ---------------- | ----------------------- | ------------------------------------------------ |
+| `microgpt.py`    | (기본 외 없음)          | 표준 인터페이스의 참조 구현                      |
+| `micrornn.py`    | `sigmoid()`             | GRU 게이팅: `z_t = sigmoid(...)`                 |
+| `microlora.py`   | (기본 외 없음)          | 기본 세트 사용                                   |
+| `microdpo.py`    | (기본 외 없음)          | `log()`는 기본 세트에 포함됨                     |
+| `microppo.py`    | `clip()`                | PPO ratio clipping                               |
+| `micromoe.py`    | (router만)              | Router는 기본 세트 사용; expert는 일반 float     |
+| `microkv.py`     | (기본 외 없음)          | 학습 전용 간결한 Value class                     |
+| `microquant.py`  | (기본 외 없음)          | 학습에는 autograd; 양자화에는 float 사용         |
+| `microbeam.py`   | (기본 외 없음)          | 학습에는 autograd; 디코딩에는 float 사용         |
 
-### Autograd Callout Pattern
+### Autograd Callout 패턴
 
-Every script using the `Value` class must include this block immediately after the class definition:
+`Value` class를 사용하는 모든 스크립트는 class 정의 직후에 이 블록을 포함해야 함:
 
 ```python
 # --- AUTOGRAD DIFFERENCES IN THIS SCRIPT ---
@@ -102,7 +102,7 @@ Every script using the `Value` class must include this block immediately after t
 # to the canonical spec.
 ```
 
-For scripts with NO additions:
+추가 사항이 없는 스크립트의 경우:
 
 ```python
 # --- AUTOGRAD IN THIS SCRIPT ---
@@ -112,17 +112,17 @@ For scripts with NO additions:
 
 ---
 
-## Numerical Stability Patterns
+## 수치 안정성 패턴
 
-These patterns are **mandatory** in every script that uses them. Each must be accompanied by a comment explaining the numerical reasoning.
+이 패턴들은 사용하는 모든 스크립트에서 **필수**임. 각 패턴에는 수치적 근거를 설명하는 주석이 반드시 있어야 함.
 
 ### Stable Softmax
 
 ```python
 def softmax(logits):
-    # Numerically stable softmax: subtract max before exp to prevent overflow.
-    # softmax is translation-invariant: softmax(x) = softmax(x - c) for any c.
-    # Without this, exp(x) overflows for x > 709 (Python's math.exp limit).
+    # 수치 안정 softmax: exp 전에 max를 빼서 오버플로우를 방지함.
+    # softmax는 이동 불변: 임의의 c에 대해 softmax(x) = softmax(x - c).
+    # 이것 없으면, x > 709일 때 exp(x)가 오버플로우됨 (Python math.exp 한계).
     max_val = max(v.data for v in logits)
     exp_vals = [(v - max_val).exp() for v in logits]
     total = sum(exp_vals)
@@ -133,13 +133,13 @@ def softmax(logits):
 
 ```python
 def safe_log(x):
-    # Prevent log(0) which returns -inf and breaks gradient computation.
-    # Clipping to 1e-10 gives log(1e-10) ≈ -23, which is finite and
-    # preserves gradient information for near-zero probabilities.
+    # log(0)을 방지함. log(0)은 -inf를 반환하고 기울기 계산을 깨뜨림.
+    # 1e-10으로 클램프하면 log(1e-10) ≈ -23이 되어, 유한하고
+    # 0에 가까운 확률에 대한 기울기 정보를 보존함.
     #
-    # Critical: we build the log node manually with x as its child so gradients
-    # flow back through the computation graph. Using Value(clamped).log() would
-    # create a disconnected node, severing the gradient path entirely.
+    # 중요: 기울기가 계산 그래프를 통해 역전파되도록 x를 자식으로 하는
+    # log 노드를 직접 생성함. Value(clamped).log()를 사용하면
+    # 연결이 끊긴 노드가 생겨서, 기울기 경로가 완전히 단절됨.
     clamped = max(x.data, 1e-10)
     return Value(math.log(clamped), (x,), (1.0 / clamped,))
 ```
@@ -148,30 +148,30 @@ def safe_log(x):
 
 ```python
 def adam_step(param, m, v, grad, lr=0.001, beta1=0.9, beta2=0.999, eps=1e-8):
-    # eps prevents division by zero when v (second moment) is near zero.
-    # Standard value: 1e-8 (matches PyTorch/TensorFlow defaults).
+    # eps는 v (2차 모멘트)가 0에 가까울 때 0으로 나누는 것을 방지함.
+    # 표준 값: 1e-8 (PyTorch/TensorFlow 기본값과 동일).
     m = beta1 * m + (1 - beta1) * grad
     v = beta2 * v + (1 - beta2) * grad ** 2
     param.data -= lr * m / (v ** 0.5 + eps)
 ```
 
-### KL Divergence Clamping (microvae only)
+### KL Divergence Clamping (microvae 전용)
 
 ```python
 def kl_divergence(mean, log_var):
-    # Clamp log_var to [-5, 5] to prevent exp(log_var) explosion.
-    # exp(5) = 148 (reasonable variance); exp(10) = 22,026 (KL blows up).
+    # log_var를 [-5, 5]로 클램프하여 exp(log_var) 폭발을 방지함.
+    # exp(5) = 148 (합리적인 분산); exp(10) = 22,026 (KL이 폭발함).
     clamped_lv = max(min(log_var.data, 5.0), -5.0)
     return Value(0.5) * (Value(1.0) + Value(clamped_lv) - mean * mean - Value(clamped_lv).exp())
 ```
 
 ---
 
-## Test Vectors
+## 테스트 벡터
 
-Use these to verify your `Value` class implementation produces correct gradients:
+`Value` class 구현이 올바른 기울기를 생성하는지 검증하는 데 사용할 것:
 
-### Test 1: Simple chain
+### 테스트 1: 단순 체인
 
 ```python
 a = Value(2.0)
@@ -182,7 +182,7 @@ assert a.grad == 3.0   # dc/da = b = 3
 assert b.grad == 3.0   # dc/db = a + 1 = 3
 ```
 
-### Test 2: Tanh gradient
+### 테스트 2: Tanh 기울기
 
 ```python
 x = Value(0.5)
@@ -192,30 +192,30 @@ y.backward()
 assert abs(x.grad - 0.7865) < 0.001
 ```
 
-### Test 3: Reuse (gradient accumulation)
+### 테스트 3: 재사용 (기울기 누적)
 
 ```python
 a = Value(2.0)
-b = a + a  # a is used twice
+b = a + a  # a가 두 번 사용됨
 b.backward()
 assert a.grad == 2.0  # db/da = 1 + 1 = 2
 ```
 
-### Test 4: Softmax stability
+### 테스트 4: Softmax 안정성
 
 ```python
 logits = [Value(1000.0), Value(1001.0), Value(1002.0)]
 probs = softmax(logits)
-# Should NOT overflow. Expected: ~[0.09, 0.24, 0.67]
+# 오버플로우되면 안 됨. 예상값: ~[0.09, 0.24, 0.67]
 assert all(0 < p.data < 1 for p in probs)
 assert abs(sum(p.data for p in probs) - 1.0) < 1e-6
 ```
 
 ---
 
-## Implementation Notes
+## 구현 참고사항
 
-- **Python object overhead:** Each `Value` stores `.data` (float), `.grad` (float), `._backward` (closure), `._prev` (set). Approximate memory: ~100 bytes per Value.
-- **Parameter budget:** The 7-minute runtime constraint effectively limits total model parameters to ~5,000 Value objects per script. Scripts exceeding this (microppo, micromoe) use hybrid autograd.
-- **Determinism:** `set` iteration order varies across Python sessions due to hash randomization. For strict reproducibility, document `PYTHONHASHSEED=0` in script headers. For pedagogical purposes, slight numerical variation across runs is acceptable.
-- **Gradient zeroing:** Must happen before every `backward()` call. Forgetting this is the most common autograd bug — gradients accumulate across training steps otherwise.
+- **Python 객체 오버헤드:** 각 `Value`는 `.data` (float), `.grad` (float), `._backward` (클로저), `._prev` (set)를 저장함. 대략적인 메모리: Value당 ~100 바이트.
+- **파라미터 예산:** 7분 런타임 제약은 스크립트당 총 모델 파라미터를 ~5,000개 Value 객체로 사실상 제한함. 이를 초과하는 스크립트(microppo, micromoe)는 hybrid autograd를 사용함.
+- **결정론:** `set` 순회 순서는 해시 랜덤화로 인해 Python 세션마다 달라짐. 엄격한 재현성이 필요하면, 스크립트 헤더에 `PYTHONHASHSEED=0`을 기록할 것. 교육 목적에서 실행 간 미세한 수치 차이는 허용됨.
+- **기울기 초기화:** 모든 `backward()` 호출 전에 반드시 수행해야 함. 이것을 빼먹는 게 가장 흔한 autograd 버그 — 안 하면 학습 스텝마다 기울기가 누적됨.

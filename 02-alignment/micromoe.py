@@ -1,6 +1,6 @@
 """
-Mixture of Experts (MoE): a router network learns to dispatch each token to a subset of
-specialist MLPs, scaling model capacity without proportionally scaling compute.
+Mixture of Experts (MoE): router 네트워크가 각 토큰을 specialist MLP의 부분집합으로
+라우팅하는 법을 학습하여, 연산량을 비례적으로 늘리지 않고 모델 용량을 확장함.
 """
 # Reference: Shazeer et al., "Outrageously Large Neural Networks: The Sparsely-Gated
 # Mixture-of-Experts Layer" (2017). https://arxiv.org/abs/1701.06538
@@ -22,40 +22,40 @@ random.seed(42)
 
 # === CONSTANTS AND HYPERPARAMETERS ===
 
-# Model architecture
-N_EMBD = 8           # embedding dimension — smaller than microgpt (16) because MoE adds
-                      # capacity through expert count rather than wider representations
-N_EXPERTS = 4        # number of expert MLPs
-TOP_K = 2            # experts selected per token — top-2 is the standard MoE choice;
-                      # top-1 (Switch Transformer) is simpler but less robust to routing errors
-EXPERT_HIDDEN = 16   # hidden dim within each expert MLP (2x expansion from N_EMBD)
-BLOCK_SIZE = 12      # context window length
+# 모델 아키텍처
+N_EMBD = 8           # embedding 차원 -- MoE가 넓은 표현이 아닌 expert 수를 통해
+                      # 용량을 추가하므로 microgpt(16)보다 작음
+N_EXPERTS = 4        # expert MLP 수
+TOP_K = 2            # 토큰당 선택되는 expert 수 -- top-2가 표준 MoE 선택임;
+                      # top-1(Switch Transformer)이 더 단순하지만 routing 오류에 덜 강건함
+EXPERT_HIDDEN = 16   # 각 expert MLP 내의 hidden 차원 (N_EMBD에서 2배 확장)
+BLOCK_SIZE = 12      # context window 길이
 
-# Training parameters
+# 학습 파라미터
 LEARNING_RATE = 0.01
 BETA1 = 0.85
 BETA2 = 0.99
 EPS_ADAM = 1e-8
 NUM_STEPS = 800
-AUX_LOSS_COEFF = 0.1  # weight for load balancing auxiliary loss — controls the tradeoff
-                       # between language modeling quality and even expert utilization.
-                       # Too low: router collapses to 1-2 experts. Too high: forces uniform
-                       # routing that prevents specialization. 0.1 is the standard starting point.
+AUX_LOSS_COEFF = 0.1  # load balancing auxiliary loss의 가중치 -- language modeling 품질과
+                       # 균등한 expert 활용 사이의 트레이드오프를 제어함.
+                       # 너무 낮으면: router가 1-2개 expert로 붕괴됨. 너무 높으면: 균일한
+                       # routing을 강제하여 전문화를 방해함. 0.1이 표준 시작점임.
 
 # Data
 DATA_URL = "https://raw.githubusercontent.com/karpathy/makemore/master/names.txt"
 DATA_FILE = "names.txt"
 
-# Signpost: ~2,000 parameters total. Production MoE models (Mixtral-8x7B, Switch-C) have
-# billions of parameters across hundreds of experts. The routing algorithm is identical;
-# only the expert size and count differ. Our 4-expert, top-2 setup captures the full
-# dynamic: router training, load balancing, expert specialization, and sparse activation.
+# 참고: 총 ~2,000개 파라미터. 프로덕션 MoE 모델(Mixtral-8x7B, Switch-C)은 수백 개
+# expert에 걸쳐 수십억 개 파라미터를 가짐. routing 알고리즘은 동일하고 expert 크기와
+# 수만 다름. 4개 expert, top-2 설정으로 전체 동작을 포착함: router 학습, load balancing,
+# expert 전문화, sparse activation.
 
 
 # === DATA LOADING ===
 
 def load_data(url: str, filename: str) -> list[str]:
-    """Download and parse the training corpus."""
+    """학습 코퍼스를 다운로드하고 파싱함."""
     if not os.path.exists(filename):
         print(f"Downloading {filename}...")
         urllib.request.urlretrieve(url, filename)
@@ -69,11 +69,11 @@ def load_data(url: str, filename: str) -> list[str]:
 # === SCALAR AUTOGRAD ENGINE ===
 
 class Value:
-    """A scalar value with reverse-mode automatic differentiation.
+    """reverse-mode 자동 미분을 지원하는 scalar 값.
 
-    Every forward operation records its local derivative (dout/dinput). backward()
-    replays the computation graph in reverse topological order, accumulating gradients
-    via the chain rule: dLoss/dx = sum over paths (product of local gradients along path).
+    모든 forward 연산은 local derivative(dout/dinput)를 기록함. backward()는
+    역 위상 정렬 순서로 computation graph를 재생하며, chain rule을 통해 gradient를
+    누적함: dLoss/dx = 경로들의 합(경로를 따른 local gradient들의 곱).
     """
     __slots__ = ('data', 'grad', '_children', '_local_grads')
 
@@ -117,7 +117,7 @@ class Value:
         return Value(max(0, self.data), (self,), (float(self.data > 0),))
 
     def backward(self) -> None:
-        """Reverse-mode autodiff via topological sort of the computation graph."""
+        """computation graph의 위상 정렬을 통한 reverse-mode autodiff."""
         topo: list[Value] = []
         visited: set[int] = set()
 
@@ -136,43 +136,43 @@ class Value:
 
 
 # --- AUTOGRAD DIFFERENCES IN THIS SCRIPT ---
-# This Value class follows the canonical interface (see docs/autograd-interface.md)
-# with no additions. The router uses Value objects for automatic differentiation.
-# Expert MLPs use plain floats with manual gradient computation.
+# 이 Value 클래스는 표준 인터페이스(docs/autograd-interface.md 참조)를 따르며
+# 추가 사항 없음. Router는 자동 미분을 위해 Value 객체를 사용함.
+# Expert MLP는 수동 gradient 계산으로 일반 float를 사용함.
 # See docs/autograd-interface.md for the full canonical interface.
 
-# IMPLEMENTATION NOTE: Experts use plain floats (not autograd Value objects) for
-# runtime tractability. The router uses scalar autograd because routing decisions
-# are the core MoE mechanism — gradients must flow through the gating function.
-# Production MoE frameworks (Mixtral, Switch Transformer) vectorize everything;
-# we split the approach to stay within pure-Python runtime constraints.
+# 구현 참고: Expert는 런타임 효율을 위해 일반 float를 사용함(autograd Value 객체가
+# 아님). Router는 routing 결정이 MoE의 핵심 메커니즘이므로 scalar autograd를
+# 사용함 -- gradient가 gating function을 통해 흘러야 함.
+# 프로덕션 MoE 프레임워크(Mixtral, Switch Transformer)는 모든 것을 벡터화함.
+# 순수 Python 런타임 제약 내에서 유지하기 위해 접근 방식을 분리함.
 
 
 # === PARAMETER INITIALIZATION ===
 
 def make_matrix(nrows: int, ncols: int, std: float = 0.08) -> list[list[Value]]:
-    """Initialize weight matrix ~ N(0, std). Standard deviation 0.08 is empirically tuned
-    for this tiny model; larger models use Xavier/Glorot scaling (std = 1/sqrt(d_in))."""
+    """가중치 행렬 초기화 ~ N(0, std). 표준편차 0.08은 이 tiny model에 맞게 경험적으로
+    튜닝됨. 더 큰 모델은 Xavier/Glorot 스케일링(std = 1/sqrt(d_in))을 사용함."""
     return [[Value(random.gauss(0, std)) for _ in range(ncols)] for _ in range(nrows)]
 
 
 def make_float_matrix(nrows: int, ncols: int, std: float = 0.08) -> list[list[float]]:
-    """Initialize a plain-float weight matrix for expert MLPs."""
+    """expert MLP용 일반 float 가중치 행렬 초기화."""
     return [[random.gauss(0, std) for _ in range(ncols)] for _ in range(nrows)]
 
 
 def init_expert_weights() -> list[dict[str, list[list[float]]]]:
-    """Initialize 4 independent expert MLPs, each with its own weights.
+    """4개의 독립적인 expert MLP를 각각의 가중치로 초기화함.
 
-    Each expert is a 2-layer MLP: input (N_EMBD) -> hidden (EXPERT_HIDDEN) -> output (N_EMBD).
-    Experts start with different random weights so they can specialize on different input
-    patterns during training. If all experts started identically, the router would have no
-    reason to prefer one over another, and symmetry breaking would depend entirely on noise.
+    각 expert는 2-layer MLP: input(N_EMBD) -> hidden(EXPERT_HIDDEN) -> output(N_EMBD).
+    Expert들이 서로 다른 랜덤 가중치로 시작하므로 학습 중 다른 입력 패턴에
+    전문화될 수 있음. 모든 expert가 동일하게 시작하면 router가 하나를 다른 것보다
+    선호할 이유가 없고, 대칭 깨짐이 전적으로 노이즈에 의존하게 됨.
     """
     experts = []
     for _ in range(N_EXPERTS):
-        # w1: [EXPERT_HIDDEN, N_EMBD] projects input to hidden dimension
-        # w2: [N_EMBD, EXPERT_HIDDEN] projects hidden back to embedding dimension
+        # w1: [EXPERT_HIDDEN, N_EMBD] 입력을 hidden 차원으로 투영
+        # w2: [N_EMBD, EXPERT_HIDDEN] hidden을 embedding 차원으로 다시 투영
         expert = {
             'w1': make_float_matrix(EXPERT_HIDDEN, N_EMBD),
             'w2': make_float_matrix(N_EMBD, EXPERT_HIDDEN),
@@ -184,13 +184,13 @@ def init_expert_weights() -> list[dict[str, list[list[float]]]]:
 # === CORE OPERATIONS ===
 
 def linear(x: list[Value], w: list[list[Value]]) -> list[Value]:
-    """Matrix-vector multiply: y = W @ x. For W of shape [n_out, n_in] and x of shape
-    [n_in], output y has shape [n_out] where y[i] = sum_j W[i,j] * x[j]."""
+    """행렬-벡터 곱: y = W @ x. W의 shape이 [n_out, n_in]이고 x의 shape이
+    [n_in]이면, 출력 y의 shape은 [n_out]이며 y[i] = sum_j W[i,j] * x[j]."""
     return [sum(w_row[j] * x[j] for j in range(len(x))) for w_row in w]
 
 
 def softmax(logits: list[Value]) -> list[Value]:
-    """Stable softmax: subtract max before exp to prevent overflow.
+    """안정적인 softmax: overflow 방지를 위해 exp 전에 max를 뺌.
     softmax(x_i) = exp(x_i - max(x)) / sum_j exp(x_j - max(x))"""
     max_val = max(v.data for v in logits)
     exp_vals = [(v - max_val).exp() for v in logits]
@@ -199,17 +199,17 @@ def softmax(logits: list[Value]) -> list[Value]:
 
 
 def rmsnorm(x: list[Value]) -> list[Value]:
-    """RMS normalization: x / sqrt(mean(x^2) + eps).
-    Simpler than LayerNorm (no mean centering, no learned affine). Used in LLaMA, Gemma."""
+    """RMS 정규화: x / sqrt(mean(x^2) + eps).
+    LayerNorm보다 단순함(mean centering 없음, 학습 가능한 affine 없음). LLaMA, Gemma에서 사용됨."""
     mean_sq = sum(xi * xi for xi in x) / len(x)
     scale = (mean_sq + 1e-5) ** -0.5
     return [xi * scale for xi in x]
 
 
 def safe_log(prob: Value) -> Value:
-    """Clipped log for numerical stability. Prevents log(0) = -inf which would break
-    gradient propagation. The node is built manually with prob as its child so
-    gradients flow back through the computation graph (not severed by clamping)."""
+    """수치 안정성을 위한 clipped log. log(0) = -inf를 방지하여 gradient 전파가
+    깨지는 것을 막음. prob을 child로 가지는 노드를 수동으로 구성하여
+    gradient가 computation graph를 통해 흐르게 함(clamping으로 끊기지 않음)."""
     clamped = max(prob.data, 1e-10)
     return Value(math.log(clamped), (prob,), (1.0 / clamped,))
 
@@ -217,21 +217,21 @@ def safe_log(prob: Value) -> Value:
 # === EXPERT FORWARD PASS (PLAIN FLOATS) ===
 
 def expert_forward_float(x: list[float], weights: dict[str, list[list[float]]]) -> list[float]:
-    """Single expert MLP forward pass: x -> hidden (ReLU) -> output. All plain floats.
+    """단일 expert MLP forward pass: x -> hidden(ReLU) -> output. 모두 일반 float.
 
-    Math: hidden = ReLU(W1 @ x), output = W2 @ hidden
-    This is a standard 2-layer MLP. Each expert learns a different input-to-output mapping,
-    so the MoE layer has 4x the capacity of a single MLP — but only activates 2 experts
-    per token, keeping compute at 2x (not 4x) of a single expert.
+    수식: hidden = ReLU(W1 @ x), output = W2 @ hidden
+    표준 2-layer MLP임. 각 expert가 다른 입력-출력 매핑을 학습하므로
+    MoE layer는 단일 MLP의 4배 용량을 가짐 -- 하지만 토큰당 2개 expert만
+    활성화하여 연산은 단일 expert의 2배(4배가 아님)로 유지됨.
     """
     w1 = weights['w1']
     w2 = weights['w2']
 
-    # Hidden layer: W1 @ x with ReLU activation
+    # Hidden layer: ReLU activation과 함께 W1 @ x
     hidden = [sum(w1[i][j] * x[j] for j in range(len(x))) for i in range(len(w1))]
     hidden = [max(0.0, h) for h in hidden]  # ReLU
 
-    # Output layer: W2 @ hidden (projects back to embedding dimension)
+    # Output layer: W2 @ hidden (embedding 차원으로 다시 투영)
     output = [sum(w2[i][j] * hidden[j] for j in range(len(hidden))) for i in range(len(w2))]
     return output
 
@@ -242,45 +242,45 @@ def expert_backward_float(
     output_grads: list[float],
     lr: float,
 ) -> None:
-    """Manual gradient computation and weight update for a single expert MLP.
+    """단일 expert MLP의 수동 gradient 계산 및 가중치 업데이트.
 
-    When the expert's output is wrapped as Value objects and multiplied by router scores,
-    backward() sets .grad on those Value wrappers. We extract those gradients as output_grads
-    and manually propagate them through the expert's plain-float layers.
+    Expert의 출력이 Value 객체로 래핑되고 router 점수와 곱해질 때,
+    backward()가 해당 Value 래퍼에 .grad를 설정함. 이 gradient를 output_grads로
+    추출하고 expert의 일반 float layer를 통해 수동으로 전파함.
 
-    Chain rule through the expert MLP:
+    Expert MLP를 통한 chain rule:
         d(loss)/d(w2[i][j]) = output_grads[i] * hidden[j]
         d(loss)/d(hidden[j]) = sum_i(output_grads[i] * w2[i][j]) * relu_grad(pre_relu[j])
         d(loss)/d(w1[i][j]) = hidden_grads[i] * x[j]
 
-    This is standard backpropagation — the same algorithm the Value class automates, but
-    done manually here for the plain-float expert weights.
+    표준 backpropagation -- Value 클래스가 자동화하는 것과 동일한 알고리즘이지만,
+    여기서는 일반 float expert 가중치에 대해 수동으로 수행함.
     """
     w1 = weights['w1']
     w2 = weights['w2']
 
-    # --- Recompute forward pass to get intermediate activations ---
+    # --- 중간 activation을 얻기 위해 forward pass 재계산 ---
     pre_relu = [sum(w1[i][j] * x[j] for j in range(len(x))) for i in range(len(w1))]
     hidden = [max(0.0, h) for h in pre_relu]
 
-    # --- Backward through W2: output = W2 @ hidden ---
+    # --- W2를 통한 backward: output = W2 @ hidden ---
     # d(loss)/d(w2[i][j]) = output_grads[i] * hidden[j]
     for i in range(len(w2)):
         for j in range(len(w2[i])):
             w2[i][j] -= lr * output_grads[i] * hidden[j]
 
-    # --- Backward through ReLU into hidden layer ---
+    # --- ReLU를 통해 hidden layer로 backward ---
     # d(loss)/d(hidden[j]) = sum_i(output_grads[i] * w2[i][j])
     # d(loss)/d(pre_relu[j]) = d(loss)/d(hidden[j]) * (1 if pre_relu[j] > 0 else 0)
     hidden_grads = [0.0] * len(w1)
     for j in range(len(hidden)):
         for i in range(len(w2)):
             hidden_grads[j] += output_grads[i] * w2[i][j]
-        # ReLU gradient: pass through if pre-activation was positive, zero otherwise
+        # ReLU gradient: pre-activation이 양수였으면 통과, 아니면 0
         if pre_relu[j] <= 0:
             hidden_grads[j] = 0.0
 
-    # --- Backward through W1: pre_relu = W1 @ x ---
+    # --- W1을 통한 backward: pre_relu = W1 @ x ---
     # d(loss)/d(w1[i][j]) = hidden_grads[i] * x[j]
     for i in range(len(w1)):
         for j in range(len(w1[i])):
@@ -295,51 +295,51 @@ def moe_forward(
     params: dict[str, list[list[Value]]],
     expert_weights: list[dict[str, list[list[float]]]],
 ) -> tuple[list[Value], list[Value], list[int], list[float]]:
-    """Forward pass through the MoE model for a single token.
+    """단일 토큰에 대한 MoE 모델 forward pass.
 
-    Architecture:
-        1. Embed token (token + position embeddings)
+    아키텍처:
+        1. 토큰 임베딩 (token + position embedding)
         2. RMSNorm
-        3. Router: linear projection to N_EXPERTS scores, softmax to probabilities
-        4. Select top-K experts by router probability
-        5. Run selected experts (plain floats), wrap outputs as Value objects
-        6. Weighted sum of expert outputs using router scores
-        7. LM head: project to vocabulary logits
+        3. Router: N_EXPERTS 점수로의 linear projection, softmax로 확률 변환
+        4. Router 확률 기준 top-K expert 선택
+        5. 선택된 expert 실행(일반 float), 출력을 Value 객체로 래핑
+        6. Router 점수를 사용한 expert 출력의 가중 합
+        7. LM head: 어휘 logit으로 투영
 
-    Returns:
-        logits: vocabulary-sized logit vector (Value objects)
-        router_probs: full router probability distribution (Value objects, for aux loss)
-        selected_experts: indices of the top-K experts chosen
-        x_float: input to experts as plain floats (cached for backward pass)
+    반환값:
+        logits: 어휘 크기의 logit 벡터 (Value 객체)
+        router_probs: 전체 router 확률 분포 (Value 객체, aux loss용)
+        selected_experts: 선택된 top-K expert의 인덱스
+        x_float: expert 입력의 일반 float (backward pass를 위해 캐시됨)
     """
-    # --- Token embedding ---
+    # --- 토큰 임베딩 ---
     tok_emb = params['wte'][token_id]
     pos_emb = params['wpe'][pos_id]
     x = [t + p for t, p in zip(tok_emb, pos_emb)]
     x = rmsnorm(x)
 
-    # --- Router: decide which experts process this token ---
-    # The router is a simple linear layer followed by softmax. It maps the token's
-    # representation to a probability distribution over experts.
-    # Math: router_probs = softmax(W_router @ x)
-    # Gradients flow through this softmax via the Value class, so the router learns
-    # which experts are best for which tokens.
+    # --- Router: 어떤 expert가 이 토큰을 처리할지 결정 ---
+    # Router는 softmax가 뒤따르는 단순한 linear layer임. 토큰의 표현을
+    # expert에 대한 확률 분포로 매핑함.
+    # 수식: router_probs = softmax(W_router @ x)
+    # 이 softmax를 통해 Value 클래스로 gradient가 흐르므로, router가
+    # 어떤 expert가 어떤 토큰에 최적인지 학습함.
     router_logits = linear(x, params['w_router'])
     router_probs = softmax(router_logits)
 
-    # --- Top-K expert selection ---
-    # Select the K experts with the highest router probabilities.
-    # Sparse activation is the defining feature of MoE: we have N_EXPERTS worth of
-    # parameters but only compute TOP_K expert forward passes per token. This is how
-    # MoE achieves the "scale capacity without scaling compute" property.
+    # --- Top-K expert 선택 ---
+    # Router 확률이 가장 높은 K개 expert를 선택함.
+    # Sparse activation이 MoE의 핵심 특성: N_EXPERTS만큼의 파라미터를 가지지만
+    # 토큰당 TOP_K개의 expert forward pass만 계산함. 이것이 MoE가
+    # "연산 확장 없이 용량을 확장"하는 방법임.
     scored = [(router_probs[i].data, i) for i in range(N_EXPERTS)]
     scored.sort(reverse=True)
     selected_experts = [idx for _, idx in scored[:TOP_K]]
 
-    # --- Renormalize selected expert scores ---
-    # After selecting top-K, renormalize their probabilities to sum to 1.
-    # This ensures the weighted combination is properly scaled regardless of how much
-    # probability mass the unselected experts had.
+    # --- 선택된 expert 점수 재정규화 ---
+    # Top-K 선택 후, 확률의 합이 1이 되도록 재정규화함.
+    # 선택되지 않은 expert가 얼마나 확률 질량을 가졌든 가중 조합이
+    # 적절하게 스케일링되도록 보장함.
     selected_scores = [router_probs[i] for i in selected_experts]
     score_sum = sum(s.data for s in selected_scores)
     if score_sum > 1e-10:
@@ -347,30 +347,30 @@ def moe_forward(
     else:
         norm_scores = [s for s in selected_scores]
 
-    # --- Expert computation (plain floats) ---
-    # Extract the Value-based representation as plain floats for expert MLPs.
-    # After experts compute their outputs, we wrap the results back as Value objects
-    # and multiply by router scores — this creates the gradient bridge between the
-    # autograd router and the plain-float experts.
+    # --- Expert 계산 (일반 float) ---
+    # Value 기반 표현을 expert MLP용 일반 float로 추출함.
+    # Expert가 출력을 계산한 후, 결과를 다시 Value 객체로 래핑하고
+    # router 점수와 곱함 -- 이것이 autograd router와 일반 float expert 사이의
+    # gradient bridge를 생성함.
     x_float = [v.data for v in x]
 
-    # --- Weighted combination of expert outputs ---
-    # Math: output = sum_i(score_i * expert_i(x)) for i in selected experts
-    # Each selected expert processes the same input independently, then their outputs
-    # are blended using the (renormalized) router probabilities as weights.
+    # --- Expert 출력의 가중 조합 ---
+    # 수식: output = sum_i(score_i * expert_i(x)) (i는 선택된 expert)
+    # 선택된 각 expert가 동일한 입력을 독립적으로 처리한 뒤, (재정규화된)
+    # router 확률을 가중치로 사용하여 출력을 블렌딩함.
     combined = [Value(0.0)] * N_EMBD
     for k_idx, expert_idx in enumerate(selected_experts):
         expert_out = expert_forward_float(x_float, expert_weights[expert_idx])
 
-        # Wrap expert output as Value objects so multiplication by the router score
-        # (a Value) creates a computation graph node. After backward(), the Value
-        # wrappers accumulate d(loss)/d(expert_output), which we use to manually
-        # update the expert weights.
+        # Expert 출력을 Value 객체로 래핑하여 router 점수(Value)와의 곱셈이
+        # computation graph 노드를 생성하게 함. backward() 후, Value 래퍼가
+        # d(loss)/d(expert_output)를 누적하며, 이를 사용하여 expert 가중치를
+        # 수동으로 업데이트함.
         for j in range(N_EMBD):
             expert_val = Value(expert_out[j])
             combined[j] = combined[j] + norm_scores[k_idx] * expert_val
 
-    # --- LM head: project to vocabulary ---
+    # --- LM head: 어휘로 투영 ---
     logits = linear(combined, params['lm_head'])
     return logits, router_probs, selected_experts, x_float
 
@@ -382,37 +382,37 @@ def compute_aux_loss(
     router_prob_sums: list[float],
     total_tokens: int,
 ) -> Value:
-    """Compute the load balancing auxiliary loss for the current training step.
+    """현재 학습 스텝의 load balancing auxiliary loss를 계산함.
 
-    Without this loss, the router collapses: it learns to send all tokens to 1-2 experts
-    (whichever happen to produce slightly lower loss early in training). The unused experts
-    never receive gradients and remain at their random initialization — a positive feedback
-    loop called "expert collapse" or "rich get richer."
+    이 loss 없이는 router가 붕괴됨: 학습 초기에 약간 더 낮은 loss를 내는
+    1-2개 expert에게만 모든 토큰을 보내는 법을 학습함. 사용되지 않는 expert는
+    gradient를 받지 못하고 랜덤 초기화 상태로 남음 -- "expert collapse" 또는
+    "rich get richer"라 불리는 양의 피드백 루프임.
 
-    The auxiliary loss penalizes uneven distribution by multiplying two quantities:
-        f_i = fraction of tokens assigned to expert i (binary assignment indicator)
-        P_i = average router probability for expert i (soft, continuous signal)
+    Auxiliary loss는 두 양의 곱을 통해 불균등한 분배에 페널티를 줌:
+        f_i = expert i에 할당된 토큰 비율 (이진 할당 지시자)
+        P_i = expert i의 평균 router 확률 (부드러운 연속 신호)
 
-    Math: L_aux = N_EXPERTS * sum_i(f_i * P_i)
+    수식: L_aux = N_EXPERTS * sum_i(f_i * P_i)
 
-    Why the product f_i * P_i? If expert i receives many tokens (high f_i) AND has high
-    average probability (high P_i), the product is large and the loss penalizes this.
-    The minimum occurs when f_i = P_i = 1/N for all experts (uniform distribution).
+    왜 f_i * P_i의 곱인가? Expert i가 많은 토큰을 받고(높은 f_i) 높은 평균
+    확률을 가지면(높은 P_i) 곱이 커지고 loss가 이를 페널티함. 최솟값은
+    모든 expert에서 f_i = P_i = 1/N(균등 분포)일 때 발생함.
 
-    The N_EXPERTS scaling factor makes the loss magnitude roughly comparable across
-    different expert counts, so AUX_LOSS_COEFF doesn't need expert-count-specific tuning.
+    N_EXPERTS 스케일링 팩터는 서로 다른 expert 수에서 loss 크기가 대략
+    비슷하게 하여, AUX_LOSS_COEFF가 expert 수에 특화된 튜닝이 필요 없게 함.
     """
     if total_tokens == 0:
         return Value(0.0)
 
     aux = Value(0.0)
     for i in range(N_EXPERTS):
-        # f_i: fraction of tokens routed to expert i
+        # f_i: expert i로 라우팅된 토큰 비율
         f_i = expert_assignment_counts[i] / total_tokens
-        # P_i: mean router probability for expert i across all tokens
+        # P_i: 모든 토큰에 대한 expert i의 평균 router 확률
         p_i = router_prob_sums[i] / total_tokens
-        # Product f_i * P_i penalizes experts that are both frequently selected
-        # and receive high router probability
+        # f_i * P_i의 곱이 자주 선택되면서 높은 router 확률을 받는
+        # expert에 페널티를 줌
         aux = aux + Value(f_i * p_i)
 
     return aux * N_EXPERTS
@@ -423,7 +423,7 @@ def compute_aux_loss(
 if __name__ == "__main__":
     start_time = time.time()
 
-    # -- Load and prepare data --
+    # -- 데이터 로드 및 준비 --
     print("Loading data...")
     docs = load_data(DATA_URL, DATA_FILE)
     random.shuffle(docs)
@@ -439,21 +439,21 @@ if __name__ == "__main__":
 
     params: dict[str, list[list[Value]]] = {}
 
-    # Token and position embeddings (Value objects)
+    # Token과 position embedding (Value 객체)
     params['wte'] = make_matrix(VOCAB_SIZE, N_EMBD)
     params['wpe'] = make_matrix(BLOCK_SIZE, N_EMBD)
 
-    # Router: linear projection from embedding space to expert scores
-    # Shape: [N_EXPERTS, N_EMBD] — one score per expert
+    # Router: embedding 공간에서 expert 점수로의 linear projection
+    # Shape: [N_EXPERTS, N_EMBD] -- expert당 하나의 점수
     params['w_router'] = make_matrix(N_EXPERTS, N_EMBD)
 
-    # LM head: project MoE output to vocabulary logits
+    # LM head: MoE 출력을 어휘 logit으로 투영
     params['lm_head'] = make_matrix(VOCAB_SIZE, N_EMBD)
 
-    # Expert MLPs (plain floats — not tracked by autograd)
+    # Expert MLP (일반 float -- autograd로 추적되지 않음)
     expert_weights = init_expert_weights()
 
-    # -- Count parameters for architecture summary --
+    # -- 아키텍처 요약을 위한 파라미터 수 계산 --
     router_params = N_EXPERTS * N_EMBD
     expert_params_each = EXPERT_HIDDEN * N_EMBD + N_EMBD * EXPERT_HIDDEN  # w1 + w2
     expert_params_total = expert_params_each * N_EXPERTS
@@ -465,7 +465,7 @@ if __name__ == "__main__":
     print(f"Embedding parameters: {embd_params} (Value class autograd)")
     print(f"Total parameters: {router_params + expert_params_total + embd_params:,}")
 
-    # -- Collect autograd parameters for Adam optimizer --
+    # -- Adam optimizer를 위한 autograd 파라미터 수집 --
     autograd_param_list: list[Value] = []
     for matrix in params.values():
         for row in matrix:
@@ -474,17 +474,17 @@ if __name__ == "__main__":
     m_state = [0.0] * len(autograd_param_list)
     v_state = [0.0] * len(autograd_param_list)
 
-    # -- Expert utilization tracking --
-    # Track which experts are selected across all tokens to detect collapse.
-    # A healthy MoE distributes tokens roughly evenly; collapse means 1-2 experts
-    # receive the vast majority of assignments.
+    # -- Expert 활용도 추적 --
+    # 붕괴를 감지하기 위해 모든 토큰에서 어떤 expert가 선택되는지 추적함.
+    # 건강한 MoE는 토큰을 대략 균등하게 분배함. 붕괴는 1-2개 expert가
+    # 대다수의 할당을 받는 것을 의미함.
     cumulative_expert_counts = [0] * N_EXPERTS
     utilization_report_interval = 200
 
-    # Smoothed loss for reporting — individual step losses are noisy because each step
-    # trains on a single document. The exponential moving average (alpha=0.05) smooths
-    # over ~20 steps, giving a more accurate picture of learning progress.
-    smooth_lm_loss = 3.3  # initialize near expected starting loss
+    # 보고용 smoothed loss -- 각 스텝이 단일 문서로 학습하므로 개별 스텝 loss가
+    # 노이즈가 많음. 지수 이동 평균(alpha=0.05)이 ~20 스텝에 걸쳐 평활화하여
+    # 학습 진행의 더 정확한 그림을 제공함.
+    smooth_lm_loss = 3.3  # 예상 시작 loss 근처로 초기화
     smooth_alpha = 0.05
 
     # === Training Loop ===
@@ -495,7 +495,7 @@ if __name__ == "__main__":
         tokens = [BOS] + [unique_chars.index(ch) for ch in doc] + [BOS]
         seq_len = min(BLOCK_SIZE, len(tokens) - 1)
 
-        # Per-step tracking for auxiliary loss computation
+        # Auxiliary loss 계산을 위한 스텝별 추적
         step_expert_counts = [0] * N_EXPERTS
         step_router_prob_sums = [0.0] * N_EXPERTS
         step_token_count = 0
@@ -509,12 +509,12 @@ if __name__ == "__main__":
                 input_token, pos, params, expert_weights,
             )
 
-            # Track expert utilization
+            # Expert 활용도 추적
             for eidx in selected_experts:
                 step_expert_counts[eidx] += 1
                 cumulative_expert_counts[eidx] += 1
 
-            # Track router probabilities for auxiliary loss
+            # Auxiliary loss를 위한 router 확률 추적
             for i in range(N_EXPERTS):
                 step_router_prob_sums[i] += router_probs[i].data
             step_token_count += 1
@@ -524,15 +524,15 @@ if __name__ == "__main__":
             loss_t = -safe_log(probs[target_token])
             losses.append(loss_t)
 
-        # -- Compute total loss: LM loss + auxiliary load balancing loss --
+        # -- 총 loss 계산: LM loss + auxiliary load balancing loss --
         lm_loss = (1.0 / seq_len) * sum(losses)
         aux_loss = compute_aux_loss(step_expert_counts, step_router_prob_sums, step_token_count)
         total_loss = lm_loss + AUX_LOSS_COEFF * aux_loss
 
-        # -- Backward pass through autograd graph --
+        # -- Autograd graph를 통한 backward pass --
         total_loss.backward()
 
-        # -- Update autograd parameters (embeddings, router, LM head) with Adam --
+        # -- Adam으로 autograd 파라미터(embedding, router, LM head) 업데이트 --
         lr_t = LEARNING_RATE * (1 - step / NUM_STEPS)
         for i, param in enumerate(autograd_param_list):
             m_state[i] = BETA1 * m_state[i] + (1 - BETA1) * param.grad
@@ -542,24 +542,25 @@ if __name__ == "__main__":
             param.data -= lr_t * m_hat / (v_hat ** 0.5 + EPS_ADAM)
             param.grad = 0.0
 
-        # -- Update expert weights via manual gradient computation --
-        # Autograd cannot reach expert weights (plain floats). We analytically compute
-        # d(loss)/d(expert_output) for each token using the standard cross-entropy
-        # gradient, then backpropagate through each expert MLP manually.
+        # -- 수동 gradient 계산을 통한 expert 가중치 업데이트 --
+        # Autograd는 expert 가중치(일반 float)에 도달할 수 없음. 표준
+        # cross-entropy gradient를 사용하여 각 토큰에 대해
+        # d(loss)/d(expert_output)를 분석적으로 계산한 뒤,
+        # 각 expert MLP를 통해 수동으로 역전파함.
         #
-        # Gradient path: loss -> softmax -> logits -> lm_head -> combined -> score * expert_out
-        # The cross-entropy gradient d(-log softmax(z)[t])/d(z[i]) = softmax(z)[i] - 1{i==t}
-        # is well-known and avoids expensive finite differences.
-        expert_lr = lr_t * 0.5  # lower LR for experts — SGD is noisier than Adam
+        # Gradient 경로: loss -> softmax -> logits -> lm_head -> combined -> score * expert_out
+        # Cross-entropy gradient d(-log softmax(z)[t])/d(z[i]) = softmax(z)[i] - 1{i==t}는
+        # 잘 알려져 있으며 비용이 큰 finite difference를 피함.
+        expert_lr = lr_t * 0.5  # expert용 낮은 LR -- SGD가 Adam보다 노이즈가 많음
 
-        # Cache LM head as floats once per step (constant across positions)
+        # LM head를 스텝당 한 번 float로 캐시 (position에 걸쳐 상수)
         lm_head_float = [[v.data for v in row] for row in params['lm_head']]
 
         for pos in range(seq_len):
             input_token = tokens[pos]
             target_token = tokens[pos + 1]
 
-            # Re-run partial forward to recover router decisions and expert inputs
+            # Router 결정과 expert 입력을 복구하기 위해 부분 forward 재실행
             tok_emb = params['wte'][input_token]
             pos_emb = params['wpe'][pos]
             x = [t + p for t, p in zip(tok_emb, pos_emb)]
@@ -580,7 +581,7 @@ if __name__ == "__main__":
 
             x_float_re = [v.data for v in x]
 
-            # Run each selected expert and compute the combined output
+            # 각 선택된 expert를 실행하고 결합된 출력을 계산
             expert_outputs: dict[int, list[float]] = {}
             for eidx in selected:
                 expert_outputs[eidx] = expert_forward_float(x_float_re, expert_weights[eidx])
@@ -590,7 +591,7 @@ if __name__ == "__main__":
                 for j in range(N_EMBD):
                     combined_float[j] += norm_score_data[k_idx] * expert_outputs[eidx][j]
 
-            # Compute softmax(logits) for the cross-entropy gradient
+            # Cross-entropy gradient를 위한 softmax(logits) 계산
             logits_float = [
                 sum(lm_head_float[i][j] * combined_float[j] for j in range(N_EMBD))
                 for i in range(VOCAB_SIZE)
@@ -609,19 +610,19 @@ if __name__ == "__main__":
             for j in range(N_EMBD):
                 for i in range(VOCAB_SIZE):
                     d_combined[j] += d_logits[i] * lm_head_float[i][j]
-                d_combined[j] /= seq_len  # scale to match averaged LM loss
+                d_combined[j] /= seq_len  # 평균 LM loss에 맞게 스케일링
 
-            # Chain through the weighted combination: d(loss)/d(expert_out) = d_combined * score
+            # 가중 조합을 통한 chain: d(loss)/d(expert_out) = d_combined * score
             for k_idx, eidx in enumerate(selected):
                 d_expert_out = [d_combined[j] * norm_score_data[k_idx] for j in range(N_EMBD)]
                 expert_backward_float(
                     x_float_re, expert_weights[eidx], d_expert_out, expert_lr,
                 )
 
-        # -- Update smoothed loss --
+        # -- Smoothed loss 업데이트 --
         smooth_lm_loss = smooth_alpha * lm_loss.data + (1 - smooth_alpha) * smooth_lm_loss
 
-        # -- Logging --
+        # -- 로깅 --
         if (step + 1) % 100 == 0 or step == 0:
             print(f"  step {step + 1:>4}/{NUM_STEPS} | lm_loss: {lm_loss.data:.4f} "
                   f"(smooth: {smooth_lm_loss:.4f}) | aux_loss: {aux_loss.data:.4f} | "
@@ -669,14 +670,14 @@ if __name__ == "__main__":
         experts_used: set[int] = set()
 
         for pos in range(BLOCK_SIZE):
-            # Forward pass for generation (no gradient tracking needed,
-            # but we reuse the same function for consistency)
+            # 생성을 위한 forward pass (gradient 추적 불필요하지만
+            # 일관성을 위해 동일한 함수를 재사용함)
             logits, router_probs, selected, _ = moe_forward(
                 token_id, pos, params, expert_weights,
             )
             experts_used.update(selected)
 
-            # Temperature-scaled sampling
+            # Temperature 스케일링된 sampling
             scaled_logits = [logit / TEMPERATURE for logit in logits]
             probs = softmax(scaled_logits)
 

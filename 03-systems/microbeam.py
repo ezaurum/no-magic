@@ -1,6 +1,6 @@
 """
-Beyond greedy: six decoding strategies for language model text generation, from deterministic
-argmax to speculative decoding with a draft-verify two-model pipeline.
+greedy 디코딩을 넘어서: 결정적 argmax부터 draft-verify 두 모델 파이프라인인
+speculative decoding까지 언어 모델 텍스트 생성을 위한 6가지 디코딩 전략을 다룸.
 """
 # Reference: Leviathan et al., "Fast Inference from Transformers via Speculative
 # Decoding" (2023). https://arxiv.org/abs/2211.17192
@@ -19,31 +19,31 @@ random.seed(42)
 
 # === CONSTANTS AND HYPERPARAMETERS ===
 
-# Target model (larger, ~4,200 params) and draft model (smaller, ~1,300 params).
-# Both share vocabulary and block_size — required for speculative decoding since
-# the draft model must produce tokens the target model can verify.
+# target 모델(더 큰 모델, ~4,200 파라미터)과 draft 모델(더 작은 모델, ~1,300 파라미터).
+# 둘 다 vocabulary와 block_size를 공유함 — speculative decoding에서 draft 모델이
+# 생성한 토큰을 target 모델이 검증할 수 있어야 하기 때문에 필수임.
 TARGET_N_EMBD, TARGET_N_HEAD, TARGET_N_LAYER = 16, 4, 1
 DRAFT_N_EMBD, DRAFT_N_HEAD, DRAFT_N_LAYER = 8, 2, 1
 BLOCK_SIZE = 16
 
-# Training
+# 학습
 LEARNING_RATE, BETA1, BETA2, EPS_ADAM = 0.01, 0.85, 0.99, 1e-8
 TARGET_STEPS, DRAFT_STEPS = 700, 500
 
-# Data
+# 데이터
 DATA_URL = "https://raw.githubusercontent.com/karpathy/makemore/master/names.txt"
 DATA_FILE = "names.txt"
 
-# Signpost: production speculative decoding pairs a 70B target with a 7B draft.
-# Our 4,200 / 1,300 param ratio preserves the algorithmic structure. Real speedups
-# come from GPU parallelism during the verify pass — here we measure acceptance
-# rate, which is the hardware-independent metric that matters.
+# 참고: 실제 프로덕션 speculative decoding은 70B target과 7B draft를 조합함.
+# 우리의 4,200 / 1,300 파라미터 비율은 알고리즘 구조를 그대로 유지함. 실제 속도 향상은
+# verify 패스 중 GPU 병렬 처리에서 나옴 — 여기서는 하드웨어 독립적인 지표인
+# 수락율을 측정함.
 
 
 # === DATA LOADING ===
 
 def load_data(url: str, filename: str) -> list[str]:
-    """Download and parse the training corpus."""
+    """학습 코퍼스를 다운로드하고 파싱함."""
     if not os.path.exists(filename):
         print(f"Downloading {filename}...")
         urllib.request.urlretrieve(url, filename)
@@ -54,12 +54,12 @@ def load_data(url: str, filename: str) -> list[str]:
 # === SCALAR AUTOGRAD ENGINE ===
 
 class Value:
-    """A scalar value with reverse-mode automatic differentiation.
+    """역전파 자동 미분을 지원하는 스칼라 값.
 
-    Tracks computational history via ._children and ._local_grads, enabling
-    gradient computation through the chain rule. Every forward operation stores
-    its local derivative (dout/dinput), then backward() replays the graph in
-    reverse topological order, accumulating gradients.
+    ._children와 ._local_grads를 통해 연산 히스토리를 추적하여, chain rule로
+    그래디언트를 계산할 수 있게 함. 모든 순방향 연산은 로컬 미분값(dout/dinput)을
+    저장하고, backward()가 역 위상 정렬 순서로 그래프를 역방향 탐색하면서
+    그래디언트를 누적함.
     """
     __slots__ = ('data', 'grad', '_children', '_local_grads')
 
@@ -104,7 +104,7 @@ class Value:
         return Value(max(0, self.data), (self,), (float(self.data > 0),))
 
     def backward(self) -> None:
-        """Reverse-mode autodiff via topological sort then chain rule."""
+        """위상 정렬 후 chain rule을 적용하는 역전파 자동 미분."""
         topo: list[Value] = []
         visited: set[int] = set()
         def build_topo(v: Value) -> None:
@@ -120,10 +120,10 @@ class Value:
                 child.grad += lg * v.grad
 
 # --- AUTOGRAD IN THIS SCRIPT ---
-# This Value class follows the canonical interface exactly.
-# Autograd is used only for training. All decoding strategies use plain float
-# forward passes for inference speed.
-# See docs/autograd-interface.md for the full specification.
+# 이 Value 클래스는 표준 인터페이스를 정확히 따름.
+# autograd는 학습에만 사용됨. 모든 디코딩 전략은 추론 속도를 위해
+# 일반 float 순방향 패스를 사용함.
+# 전체 명세는 docs/autograd-interface.md 참조.
 
 
 # === TRAINING HELPERS (Value-based) ===
@@ -135,7 +135,7 @@ def linear_v(x: list[Value], w: list[list[Value]]) -> list[Value]:
     return [sum(w_row[j] * x[j] for j in range(len(x))) for w_row in w]
 
 def softmax_v(logits: list[Value]) -> list[Value]:
-    """Numerically stable softmax: subtract max before exp to prevent overflow."""
+    """수치적으로 안정적인 softmax: 오버플로 방지를 위해 exp 전에 최댓값을 뺌."""
     mx = max(v.data for v in logits)
     exps = [(v - mx).exp() for v in logits]
     total = sum(exps)
@@ -147,8 +147,8 @@ def rmsnorm_v(x: list[Value]) -> list[Value]:
     return [xi * scale for xi in x]
 
 def safe_log(prob: Value) -> Value:
-    """Clipped log: clamp to 1e-10 to prevent log(0). Node keeps prob as child
-    so gradients flow back through the computation graph."""
+    """클리핑된 log: log(0) 방지를 위해 1e-10으로 클램핑함. 노드가 prob을
+    자식으로 유지해서 연산 그래프를 통해 그래디언트가 역전파됨."""
     clamped = max(prob.data, 1e-10)
     return Value(math.log(clamped), (prob,), (1.0 / clamped,))
 
@@ -158,7 +158,7 @@ def gpt_forward_train(
     params: dict[str, list[list[Value]]],
     n_embd: int, n_head: int, n_layer: int, head_dim: int,
 ) -> list[Value]:
-    """Single-token GPT forward pass for training, parameterized by model config."""
+    """학습용 단일 토큰 GPT 순방향 패스. 모델 설정으로 파라미터화됨."""
     x = [t + p for t, p in zip(params['wte'][token_id], params['wpe'][pos_id])]
     x = rmsnorm_v(x)
     for li in range(n_layer):
@@ -168,7 +168,7 @@ def gpt_forward_train(
         k = linear_v(x, params[f'l{li}.wk'])
         v = linear_v(x, params[f'l{li}.wv'])
         keys[li].append(k); values[li].append(v)
-        # Multi-head attention with incremental KV construction (implicit causal mask)
+        # 점진적 KV 구성을 사용한 multi-head attention (암묵적 causal mask)
         x_attn: list[Value] = []
         for h in range(n_head):
             hs = h * head_dim
@@ -192,8 +192,8 @@ def gpt_forward_train(
 
 
 # === PLAIN-FLOAT INFERENCE ===
-# After training, weights are extracted as plain floats. All six decoding
-# strategies operate here — no autograd overhead, enabling clean comparison.
+# 학습 후 가중치를 일반 float으로 추출함. 6가지 디코딩 전략 모두
+# 여기서 동작함 — autograd 오버헤드 없이 깔끔한 비교가 가능함.
 
 def extract(w: list[list[Value]]) -> list[list[float]]:
     return [[v.data for v in row] for row in w]
@@ -211,14 +211,14 @@ def rmsnorm_f(x: list[float]) -> list[float]:
     mean_sq = sum(xi * xi for xi in x) / len(x)
     return [xi * (mean_sq + 1e-5) ** -0.5 for xi in x]
 
-# Model config dict: n_embd, n_head, n_layer, head_dim, vocab_size, bos
+# 모델 설정 딕셔너리: n_embd, n_head, n_layer, head_dim, vocab_size, bos
 Cfg = dict
 
 def forward_float(tok: int, pos: int, kv: list[dict[str, list[list[float]]]],
                   wf: dict[str, list[list[float]]], c: Cfg) -> list[float]:
-    """GPT forward pass using plain floats. Processes one token, appends K/V to
-    kv cache, returns logits. Shared by all decoding strategies — they differ
-    only in how they select the next token from these logits."""
+    """일반 float을 사용하는 GPT 순방향 패스. 토큰 하나를 처리하고 K/V를
+    kv 캐시에 추가한 뒤 logits를 반환함. 모든 디코딩 전략이 이 함수를 공유함 —
+    차이점은 오직 이 logits에서 다음 토큰을 어떻게 선택하느냐에 있음."""
     x = [wf['wte'][tok][j] + wf['wpe'][pos][j] for j in range(c['n_embd'])]
     x = rmsnorm_f(x)
     for li in range(c['n_layer']):
@@ -253,12 +253,12 @@ def make_kv(c: Cfg) -> list[dict[str, list[list[float]]]]:
     return [{'k': [], 'v': []} for _ in range(c['n_layer'])]
 
 def clone_kv(cache: list[dict[str, list[list[float]]]]) -> list[dict[str, list[list[float]]]]:
-    """Deep copy KV cache so beam branches don't share mutable state."""
+    """beam 브랜치가 가변 상태를 공유하지 않도록 KV 캐시를 깊은 복사함."""
     return [{'k': [r[:] for r in l['k']], 'v': [r[:] for r in l['v']]} for l in cache]
 
 def feed_prompt(toks: list[int], wf: dict[str, list[list[float]]],
                 c: Cfg) -> tuple[list[dict[str, list[list[float]]]], list[float]]:
-    """Feed prompt through the model, returning (kv_cache, last_logits)."""
+    """프롬프트를 모델에 통과시켜 (kv_cache, last_logits)를 반환함."""
     kv = make_kv(c)
     logits: list[float] = []
     for i, t in enumerate(toks):
@@ -267,16 +267,16 @@ def feed_prompt(toks: list[int], wf: dict[str, list[list[float]]],
 
 
 # === DECODING STRATEGIES ===
-# Each strategy takes a prompt, weights, and config, returns generated tokens
-# plus total log-probability. They differ ONLY in token selection.
+# 각 전략은 프롬프트, 가중치, 설정을 받아 생성된 토큰과 총 log-probability를
+# 반환함. 차이점은 오직 토큰 선택 방식에만 있음.
 
 def decode_greedy(prompt: list[int], wf: dict, c: Cfg,
                   max_len: int = 12) -> tuple[list[int], float]:
-    """Always pick the highest-probability token. Deterministic.
+    """항상 가장 확률 높은 토큰을 선택함. 결정적임.
 
-    Simple but suboptimal: commits to the locally best choice at each step,
-    which can miss globally better sequences. Greedy decoding is optimal only
-    when the model is perfectly calibrated (it never is).
+    단순하지만 최적은 아님: 매 스텝에서 지역적 최선을 선택하므로 전역적으로
+    더 나은 시퀀스를 놓칠 수 있음. greedy 디코딩은 모델이 완벽하게 보정되었을 때만
+    최적인데 (실제로는 절대 그렇지 않음).
     """
     kv, logits = feed_prompt(prompt, wf, c)
     gen: list[int] = []
@@ -295,12 +295,12 @@ def decode_greedy(prompt: list[int], wf: dict, c: Cfg,
 
 def decode_temperature(prompt: list[int], wf: dict, c: Cfg,
                        max_len: int = 12, temperature: float = 0.8) -> tuple[list[int], float]:
-    """Scale logits by temperature before sampling.
+    """sampling 전에 logits를 temperature로 스케일링함.
 
-    Temperature reshapes the probability distribution without changing its
-    ranking. T < 1 sharpens (more deterministic), T > 1 flattens (more random).
-    The math: softmax(logits/T) concentrates mass on the mode as T -> 0
-    and approaches uniform as T -> inf.
+    temperature는 확률 분포의 순위를 바꾸지 않고 형태만 변형함.
+    T < 1이면 날카로워짐(더 결정적), T > 1이면 평탄해짐(더 무작위).
+    수학적으로: softmax(logits/T)는 T -> 0이면 최빈값에 질량이 집중되고
+    T -> inf이면 균등 분포에 수렴함.
     """
     kv, logits = feed_prompt(prompt, wf, c)
     gen: list[int] = []
@@ -319,11 +319,10 @@ def decode_temperature(prompt: list[int], wf: dict, c: Cfg,
 
 def decode_top_k(prompt: list[int], wf: dict, c: Cfg,
                  max_len: int = 12, k: int = 5) -> tuple[list[int], float]:
-    """Only consider the k most likely tokens, zero out the rest.
+    """가장 확률 높은 k개의 토큰만 고려하고 나머지는 0으로 만듦.
 
-    Prevents sampling from the long tail of unlikely tokens. The cutoff is
-    fixed regardless of the model's confidence — this rigidity is top-k's
-    weakness compared to top-p.
+    확률이 낮은 토큰의 긴 꼬리에서 sampling하는 것을 방지함. 모델의 확신도와
+    무관하게 컷오프가 고정됨 — 이 경직성이 top-p 대비 top-k의 약점임.
     """
     kv, logits = feed_prompt(prompt, wf, c)
     gen: list[int] = []
@@ -339,7 +338,7 @@ def decode_top_k(prompt: list[int], wf: dict, c: Cfg,
         filt = [p / total for p in filt]
         tok = random.choices(range(c['vocab_size']), weights=filt)[0]
         if tok == c['bos']: break
-        # Log-prob from the ORIGINAL distribution — measures model confidence
+        # 원래 분포에서의 log-prob — 모델의 확신도를 측정함
         lp += math.log(max(probs[tok], 1e-10))
         gen.append(tok)
         logits = forward_float(tok, pos, kv, wf, c)
@@ -348,12 +347,12 @@ def decode_top_k(prompt: list[int], wf: dict, c: Cfg,
 
 def decode_top_p(prompt: list[int], wf: dict, c: Cfg,
                  max_len: int = 12, p: float = 0.9) -> tuple[list[int], float]:
-    """Include tokens until cumulative probability exceeds p (nucleus sampling).
+    """누적 확률이 p를 초과할 때까지 토큰을 포함함 (nucleus sampling).
 
-    Adaptive: for confident predictions (one token at 95%), only that token
-    is considered. For uncertain predictions, many tokens enter the nucleus.
-    This adaptivity is why top-p often outperforms fixed top-k — the model's
-    own confidence determines the effective vocabulary size at each step.
+    적응적임: 확신 높은 예측(한 토큰이 95%)에서는 해당 토큰만 고려됨.
+    불확실한 예측에서는 많은 토큰이 nucleus에 포함됨. 이 적응성이 top-p가
+    고정 top-k보다 우수한 이유임 — 모델 자체의 확신도가 각 스텝에서
+    유효 어휘 크기를 결정함.
     """
     kv, logits = feed_prompt(prompt, wf, c)
     gen: list[int] = []
@@ -382,15 +381,15 @@ def decode_top_p(prompt: list[int], wf: dict, c: Cfg,
 
 def decode_beam(prompt: list[int], wf: dict, c: Cfg,
                 max_len: int = 12, beam_width: int = 3) -> tuple[list[int], float]:
-    """Maintain top-B candidate sequences, expand and prune at each step.
+    """상위 B개의 후보 시퀀스를 유지하면서 매 스텝마다 확장하고 가지치기함.
 
-    Finds higher log-probability sequences than greedy by exploring multiple
-    paths simultaneously. Beam search is NOT sampling — it is a deterministic
-    search algorithm. Two runs with the same input produce identical output.
-    The key tradeoff: beam_width * cost_per_step compute for potentially much
-    better global solutions. Used heavily in machine translation.
+    여러 경로를 동시에 탐색하여 greedy보다 높은 log-probability 시퀀스를
+    찾음. beam search는 sampling이 아님 — 결정적 검색 알고리즘임. 같은 입력에
+    대해 두 번 실행하면 동일한 출력이 나옴. 핵심 트레이드오프: beam_width *
+    스텝당_비용의 연산량으로 잠재적으로 훨씬 나은 전역 해를 얻음. 기계 번역에서
+    많이 사용됨.
     """
-    # Each beam: (cumulative_log_prob, generated_tokens, kv_cache, pending_logits)
+    # 각 beam: (누적_log_prob, 생성된_토큰들, kv_cache, 대기중_logits)
     init_kv, init_logits = feed_prompt(prompt, wf, c)
     beams: list[tuple[float, list[int], list[dict[str, list[list[float]]]], list[float]]] = [
         (0.0, [], clone_kv(init_kv), init_logits)
@@ -411,12 +410,12 @@ def decode_beam(prompt: list[int], wf: dict, c: Cfg,
                 if idx == c['bos']:
                     completed.append((blp + token_lp, btoks))
                     continue
-                # Each expansion gets its own KV cache copy (beams diverge)
+                # 각 확장은 자체 KV 캐시 복사본을 가짐 (beam이 분기됨)
                 new_kv = clone_kv(bkv)
                 new_logits = forward_float(idx, pos, new_kv, wf, c)
                 candidates.append((blp + token_lp, btoks + [idx], new_kv, new_logits))
         if not candidates: break
-        # Prune: keep only top beam_width by cumulative log-prob
+        # 가지치기: 누적 log-prob 기준 상위 beam_width개만 유지
         candidates.sort(key=lambda x: x[0], reverse=True)
         beams = candidates[:beam_width]
 
@@ -430,19 +429,18 @@ def decode_speculative(
     prompt: list[int], t_wf: dict, d_wf: dict, tc: Cfg, dc: Cfg,
     max_len: int = 12, draft_k: int = 4,
 ) -> tuple[list[int], float, int, int]:
-    """Draft model generates k tokens, target model verifies.
+    """draft 모델이 k개의 토큰을 생성하고, target 모델이 검증함.
 
-    The key insight: verifying k tokens with the target model costs roughly
-    the same as generating 1 token (on a GPU, k forward passes batch into one).
-    If the draft tokens match the target's distribution, we get ~k tokens per
-    target verification — a significant speedup.
+    핵심 아이디어: target 모델로 k개 토큰을 검증하는 비용이 1개 토큰을 생성하는
+    비용과 거의 같음 (GPU에서는 k번의 순방향 패스가 하나로 배치됨). draft 토큰이
+    target의 분포와 일치하면 target 검증 한 번에 ~k개 토큰을 얻음 — 상당한
+    속도 향상임.
 
-    Acceptance (Leviathan et al.): accept each draft token with probability
-    min(1, p_target/p_draft). On rejection, resample from max(0, p_target -
-    p_draft) and discard subsequent drafts. This is lossless: the output
-    distribution exactly matches the target model.
+    수락 기준 (Leviathan et al.): 각 draft 토큰을 min(1, p_target/p_draft)
+    확률로 수락함. 거부 시 max(0, p_target - p_draft)에서 재샘플링하고 이후
+    draft를 폐기함. 이것은 무손실임: 출력 분포가 target 모델과 정확히 일치함.
 
-    Returns: (tokens, log_prob, total_proposed, total_accepted)
+    반환값: (tokens, log_prob, total_proposed, total_accepted)
     """
     t_kv, t_logits = feed_prompt(prompt, t_wf, tc)
     d_kv, d_logits = feed_prompt(prompt, d_wf, dc)
@@ -456,7 +454,7 @@ def decode_speculative(
         remaining = min(draft_k, max_len - len(gen))
         if cur >= BLOCK_SIZE or remaining <= 0: break
 
-        # Phase 1: Draft model proposes k tokens greedily (fast, small model)
+        # 1단계: draft 모델이 greedy로 k개 토큰을 제안함 (빠르고 작은 모델)
         draft_toks: list[int] = []
         draft_probs: list[list[float]] = []
         tmp_d_kv = clone_kv(d_kv)
@@ -472,7 +470,7 @@ def decode_speculative(
             tmp_d_logits = forward_float(dtok, pos, tmp_d_kv, d_wf, dc)
 
         if not draft_toks:
-            # Draft produced BOS — fall back to one target greedy step
+            # draft가 BOS를 생성함 — target greedy 한 스텝으로 폴백
             tp = softmax_f(t_logits)
             ttok = max(range(tc['vocab_size']), key=lambda i: tp[i])
             if ttok == tc['bos']: break
@@ -484,9 +482,9 @@ def decode_speculative(
 
         total_proposed += len(draft_toks)
 
-        # Phase 2: Target model verifies each draft token
-        # On GPU this would be one batched forward pass. The acceptance logic is
-        # identical to the parallel version regardless of serial/parallel execution.
+        # 2단계: target 모델이 각 draft 토큰을 검증함
+        # GPU에서는 하나의 배치 순방향 패스가 됨. 수락 로직은
+        # 직렬/병렬 실행 여부와 무관하게 동일함.
         accepted: list[int] = []
         tmp_t_kv = clone_kv(t_kv)
         tmp_t_logits = t_logits[:]
@@ -495,14 +493,14 @@ def decode_speculative(
             tp = softmax_f(tmp_t_logits)
             dp = draft_probs[vi]
             dtok = draft_toks[vi]
-            # Rejection sampling: accept with p = min(1, p_target/p_draft)
+            # rejection sampling: p = min(1, p_target/p_draft)로 수락
             ratio = min(1.0, tp[dtok] / max(dp[dtok], 1e-10))
             if random.random() < ratio:
                 accepted.append(dtok)
                 lp += math.log(max(tp[dtok], 1e-10))
                 tmp_t_logits = forward_float(dtok, cur + vi, tmp_t_kv, t_wf, tc)
             else:
-                # Reject: resample from max(0, p_target - p_draft)
+                # 거부: max(0, p_target - p_draft)에서 재샘플링
                 adj = [max(0.0, tp[j] - dp[j]) for j in range(len(tp))]
                 adj_s = sum(adj)
                 if adj_s > 0:
@@ -514,11 +512,11 @@ def decode_speculative(
                     accepted.append(rtok)
                     lp += math.log(max(tp[rtok], 1e-10))
                     forward_float(rtok, cur + vi, tmp_t_kv, t_wf, tc)
-                break  # Discard all remaining draft tokens after rejection
+                break  # 거부 이후 남은 draft 토큰 전부 폐기
 
         total_accepted += len(accepted)
 
-        # Commit accepted tokens to both real KV caches
+        # 수락된 토큰을 양쪽 실제 KV 캐시에 커밋
         for ai, atok in enumerate(accepted):
             t_logits = forward_float(atok, cur + ai, t_kv, t_wf, tc)
             d_logits = forward_float(atok, cur + ai, d_kv, d_wf, dc)
@@ -540,7 +538,7 @@ def decode_speculative(
 
 def init_params(vocab_size: int, n_embd: int, n_head: int,
                 n_layer: int) -> dict[str, list[list[Value]]]:
-    """Initialize all GPT parameters for the given dimensions."""
+    """주어진 차원에 맞게 모든 GPT 파라미터를 초기화함."""
     p: dict[str, list[list[Value]]] = {}
     p['wte'] = make_matrix(vocab_size, n_embd)
     p['wpe'] = make_matrix(BLOCK_SIZE, n_embd)
@@ -558,7 +556,7 @@ def init_params(vocab_size: int, n_embd: int, n_head: int,
 def train_model(docs: list[str], chars: list[str], bos: int, vocab_size: int,
                 params: dict[str, list[list[Value]]], n_embd: int, n_head: int,
                 n_layer: int, head_dim: int, num_steps: int) -> None:
-    """Train a GPT model with Adam optimizer and linear LR decay."""
+    """Adam 옵티마이저와 선형 LR 감쇠로 GPT 모델을 학습함."""
     plist = [p for w in params.values() for row in w for p in row]
     m_s = [0.0] * len(plist)
     v_s = [0.0] * len(plist)
@@ -604,7 +602,7 @@ if __name__ == "__main__":
     VOCAB_SIZE = len(unique_chars) + 1
     print(f"Loaded {len(docs)} documents, vocab size: {VOCAB_SIZE}\n")
 
-    # Train target model (larger)
+    # target 모델 학습 (더 큰 모델)
     print(f"=== Training Target Model (n_embd={TARGET_N_EMBD}, n_layer={TARGET_N_LAYER}) ===")
     target_params = init_params(VOCAB_SIZE, TARGET_N_EMBD, TARGET_N_HEAD, TARGET_N_LAYER)
     t0 = time.time()
@@ -613,7 +611,7 @@ if __name__ == "__main__":
                 TARGET_N_EMBD // TARGET_N_HEAD, TARGET_STEPS)
     print(f"Target model trained in {time.time() - t0:.1f}s")
 
-    # Train draft model (smaller)
+    # draft 모델 학습 (더 작은 모델)
     print(f"\n=== Training Draft Model (n_embd={DRAFT_N_EMBD}, n_layer={DRAFT_N_LAYER}) ===")
     draft_params = init_params(VOCAB_SIZE, DRAFT_N_EMBD, DRAFT_N_HEAD, DRAFT_N_LAYER)
     t0 = time.time()
@@ -622,7 +620,7 @@ if __name__ == "__main__":
                 DRAFT_N_EMBD // DRAFT_N_HEAD, DRAFT_STEPS)
     print(f"Draft model trained in {time.time() - t0:.1f}s")
 
-    # Extract weights as plain floats for inference
+    # 추론을 위해 가중치를 일반 float으로 추출
     twf = {k: extract(v) for k, v in target_params.items()}
     dwf = {k: extract(v) for k, v in draft_params.items()}
     tc: Cfg = {'n_embd': TARGET_N_EMBD, 'n_head': TARGET_N_HEAD,
@@ -665,9 +663,9 @@ if __name__ == "__main__":
         print(f"{'Speculative (k=4)':<22} {tok2str(s):<16} {slp:>10.2f} {tps:>12.1f}")
 
     # === DIVERSITY ANALYSIS ===
-    # Deterministic strategies (greedy, beam) produce the same output for the same
-    # prompt. Stochastic strategies (temperature, top-k, top-p) produce diversity —
-    # essential for creative applications, undesirable for factual ones.
+    # 결정적 전략(greedy, beam)은 같은 프롬프트에 대해 같은 출력을 생성함.
+    # 확률적 전략(temperature, top-k, top-p)은 다양성을 만들어냄 —
+    # 창작 용도에서는 필수적이지만 사실 기반 용도에서는 바람직하지 않음.
     print("\n=== Diversity Analysis ===")
     print("Generated 20 names with each strategy:\n")
     n_samp = 20
@@ -709,7 +707,7 @@ if __name__ == "__main__":
     print(f"Total proposed: {tot_prop} | Total accepted: {tot_acc}")
     print(f"Average acceptance rate: {acc_rate:.1f}%")
     print(f"Average tokens accepted per target verify pass: {toks_per_round:.1f}")
-    # Signpost: in production with a well-matched draft model, acceptance rates of
-    # 70-90% are common. The real GPU speedup comes from batching the k verification
-    # forward passes into a single kernel launch — our scalar Python cannot show that
-    # parallelism, but the acceptance rate is the hardware-independent metric.
+    # 참고: 프로덕션에서 잘 매칭된 draft 모델을 사용하면 70-90%의 수락율이 일반적임.
+    # 실제 GPU 속도 향상은 k번의 검증 순방향 패스를 단일 커널 런치로 배치하는 데서 나옴
+    # — 우리의 스칼라 Python은 그 병렬성을 보여줄 수 없지만, 수락율이 하드웨어
+    # 독립적인 지표임.

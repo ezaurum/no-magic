@@ -1,24 +1,24 @@
-# no-magic — Implementation Plan
+# 마술아님 — 구현 계획
 
-This document details every script in the `no-magic` repository: what each one teaches, what it implements, architectural decisions, dataset strategy, and expected complexity. Use this as the engineering spec for building out the collection.
+이 문서는 `no-magic` 저장소의 모든 스크립트를 상세히 기술함: 각 스크립트가 가르치는 것, 구현하는 것, 아키텍처 결정, 데이터셋 전략, 예상 복잡도. 컬렉션을 구축하기 위한 엔지니어링 스펙으로 사용할 것.
 
-### Relationship to Karpathy's Work
+### Karpathy의 작업과의 관계
 
-This project is inspired by Andrej Karpathy's [micrograd](https://github.com/karpathy/micrograd), [makemore](https://github.com/karpathy/makemore), and `microgpt.py`. We reference and attribute his work but do not replicate it. Specifically: `microgpt.py` is included with full attribution; `micrornn.py` covers the RNN → GRU progression that makemore explores across notebooks, condensed into a single comparative file; and the autograd engine (micrograd) is already embedded within `microgpt.py`. For deeper dives into those specific topics, readers are directed to Karpathy's original repositories.
+이 프로젝트는 Andrej Karpathy의 [micrograd](https://github.com/karpathy/micrograd), [makemore](https://github.com/karpathy/makemore), `microgpt.py`에서 영감을 받았음. 그의 작업을 참조하고 출처를 밝히지만 복제하지는 않음. 구체적으로: `microgpt.py`는 완전한 출처 표기와 함께 포함됨; `micrornn.py`는 makemore가 여러 노트북에 걸쳐 탐구하는 RNN → GRU 진행을 하나의 비교 파일로 압축함; autograd 엔진(micrograd)은 이미 `microgpt.py` 안에 내장되어 있음. 해당 주제에 대한 심층 학습은 Karpathy의 원본 저장소를 참조할 것.
 
 ---
 
-## Repository Structure
+## 저장소 구조
 
 ```plaintext
 no-magic/
 ├── README.md
 ├── CONTRIBUTING.md
 ├── docs/
-│   ├── implementation.md       # This file — engineering spec
-│   └── autograd-interface.md   # Canonical Value class interface
+│   ├── implementation.md       # 이 파일 — 엔지니어링 스펙
+│   └── autograd-interface.md   # 표준 Value class 인터페이스
 ├── 01-foundations/
-│   ├── README.md               # Algorithm list + roadmap
+│   ├── README.md               # 알고리즘 목록 + 로드맵
 │   ├── microgpt.py
 │   ├── micrornn.py
 │   ├── microtokenizer.py
@@ -27,13 +27,13 @@ no-magic/
 │   ├── microdiffusion.py
 │   └── microvae.py
 ├── 02-alignment/
-│   ├── README.md               # Algorithm list + roadmap
+│   ├── README.md               # 알고리즘 목록 + 로드맵
 │   ├── microlora.py
 │   ├── microdpo.py
 │   ├── microppo.py
 │   └── micromoe.py
 └── 03-systems/
-    ├── README.md               # Algorithm list + roadmap
+    ├── README.md               # 알고리즘 목록 + 로드맵
     ├── microattention.py
     ├── microkv.py
     ├── microquant.py
@@ -41,38 +41,38 @@ no-magic/
     └── microbeam.py
 ```
 
-## Design Constraints (Enforced Across All Scripts)
+## 설계 제약 (모든 스크립트에 적용)
 
-| Constraint          | Rule                                                                                                                                                                                     |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| File count          | Exactly one `.py` file per algorithm                                                                                                                                                     |
-| Dependencies        | Python standard library only (`os`, `math`, `random`, `json`, `struct`, `urllib`, `collections`, `itertools`, `functools`, `string`, `hashlib`, `time`)                                  |
-| Execution           | `python script.py` with no arguments runs the full train + inference loop                                                                                                                |
-| Runtime             | Under **7 minutes on M-series Mac** or under **10 minutes on 2019-era Intel i5**. Target 7 min to leave headroom for slower hardware.                                                    |
-| Dataset             | Auto-downloaded on first run via `urllib`, cached locally, under 5MB                                                                                                                     |
-| Output              | Prints training progress and inference results to stdout                                                                                                                                 |
-| Seed                | `random.seed(42)` for reproducibility                                                                                                                                                    |
-| Comments            | **Mandatory.** Every script must follow the commenting standard in `CONTRIBUTING.md`. Scripts will not be merged without adequate commentary.                                            |
-| Autograd            | Scripts using scalar autograd must implement the canonical `Value` class interface defined in `docs/autograd-interface.md`                                                               |
-| Numerical stability | All scripts must use stable softmax (`exp(x - max(x))`), clipped log-probabilities (`max(p, 1e-10)`), and Adam epsilon (`1e-8`). See `docs/autograd-interface.md` for required patterns. |
+| 제약              | 규칙                                                                                                                                                                                     |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 파일 수           | 알고리즘당 정확히 하나의 `.py` 파일                                                                                                                                                      |
+| 의존성            | Python 표준 라이브러리만 (`os`, `math`, `random`, `json`, `struct`, `urllib`, `collections`, `itertools`, `functools`, `string`, `hashlib`, `time`)                                       |
+| 실행              | `python script.py`를 인자 없이 실행하면 전체 학습 + 추론 루프가 돌아감                                                                                                                   |
+| 런타임            | **M-series Mac에서 7분 이내** 또는 **2019년대 Intel i5에서 10분 이내**. 느린 하드웨어를 위한 여유를 두고 7분을 목표로 함.                                                                  |
+| 데이터셋          | 첫 실행 시 `urllib`로 자동 다운로드, 로컬 캐시, 5MB 이하                                                                                                                                 |
+| 출력              | 학습 진행 상황과 추론 결과를 stdout에 출력                                                                                                                                               |
+| 시드              | 재현성을 위해 `random.seed(42)`                                                                                                                                                          |
+| 주석              | **필수.** 모든 스크립트는 `CONTRIBUTING.md`의 주석 표준을 따라야 함. 충분한 주석 없이는 병합되지 않음.                                                                                     |
+| Autograd          | scalar autograd를 사용하는 스크립트는 `docs/autograd-interface.md`에 정의된 표준 `Value` class 인터페이스를 구현해야 함                                                                   |
+| 수치 안정성       | 모든 스크립트는 stable softmax (`exp(x - max(x))`), clipped log-probability (`max(p, 1e-10)`), Adam epsilon (`1e-8`)을 사용해야 함. 필수 패턴은 `docs/autograd-interface.md` 참조.        |
 
-### Minimum Hardware Requirements
+### 최소 하드웨어 요구사항
 
 - Python 3.10+
 - 8 GB RAM
-- Any modern CPU (2019-era or newer)
+- 모든 최신 CPU (2019년대 이후)
 
-Scripts are tested on M-series Mac (primary) and Intel i5 (secondary). If a script runs in 7 minutes on M-series, it should complete within 10 minutes on 2019-era Intel.
+스크립트는 M-series Mac(기본)과 Intel i5(보조)에서 테스트됨. M-series에서 7분 안에 실행되면, 2019년대 Intel에서 10분 이내에 완료되어야 함.
 
-### Commenting Standard
+### 주석 표준
 
-See `CONTRIBUTING.md` for the full commenting standard (7 required comment types, density targets, examples). This is the single authoritative reference for comment quality.
+전체 주석 표준(필수 주석 7종, 밀도 목표, 예시)은 `CONTRIBUTING.md`를 참조할 것. 이것이 주석 품질의 유일한 권위 있는 참조임.
 
-**Summary:** File thesis, section headers, "why" comments, math-to-code mappings, intuition comments, signpost comments, no obvious comments. Target 30-40% comment density. The test: _could a motivated engineer read this file top-to-bottom in one sitting and understand the algorithm?_
+**요약:** 파일 테시스, 섹션 헤더, "왜" 주석, 수식-코드 매핑, 직관 주석, 표지판 주석, 자명한 주석 금지. 30-40% 주석 밀도를 목표로 함. 테스트: _의욕 있는 엔지니어가 이 파일을 처음부터 끝까지 한 번에 읽고 알고리즘을 이해할 수 있는가?_
 
-### Autograd Callout Pattern
+### Autograd Callout 패턴
 
-Scripts that reimplement the scalar autograd `Value` class (microgpt, micrornn, microlora, microdpo, microppo, micromoe) must include a callout block immediately after the Value class definition:
+scalar autograd `Value` class를 재구현하는 스크립트(microgpt, micrornn, microlora, microdpo, microppo, micromoe)는 Value class 정의 직후에 callout 블록을 포함해야 함:
 
 ```python
 # --- AUTOGRAD DIFFERENCES IN THIS SCRIPT ---
@@ -83,460 +83,460 @@ Scripts that reimplement the scalar autograd `Value` class (microgpt, micrornn, 
 # See docs/autograd-interface.md for the full canonical interface.
 ```
 
-This prevents readers from skipping the autograd section and missing per-script differences.
+이렇게 하면 독자가 autograd 섹션을 건너뛰고 스크립트별 차이를 놓치는 것을 방지함.
 
 ---
 
-## 01 — Foundations
+## 01 — 기초
 
-### `microgpt.py` — Autoregressive Language Model
+### `microgpt.py` — 자기회귀 언어 모델
 
-> _"The most atomic way to train and inference a GPT in pure, dependency-free Python."_
+> _"GPT를 순수한, 의존성 없는 Python으로 학습하고 추론하는 가장 원자적인 방법."_
 
-**What it teaches:**
+**가르치는 것:**
 
-- Scalar autograd via reverse-mode automatic differentiation
-- Token and positional embeddings
-- Multi-head self-attention with causal masking (via incremental KV construction)
-- RMSNorm, residual connections, MLP blocks
-- Cross-entropy loss, Adam optimizer with bias correction
-- Temperature-scaled autoregressive sampling
+- Reverse-mode automatic differentiation을 통한 scalar autograd
+- Token 및 positional embedding
+- Causal masking을 사용한 multi-head self-attention (점진적 KV 구성 방식)
+- RMSNorm, residual connection, MLP 블록
+- Cross-entropy loss, bias correction이 포함된 Adam optimizer
+- Temperature-scaled 자기회귀 샘플링
 
-**Architecture:** GPT-2 variant — RMSNorm instead of LayerNorm, no biases, ReLU instead of GELU
+**아키텍처:** GPT-2 변형 — LayerNorm 대신 RMSNorm, 바이어스 없음, GELU 대신 ReLU
 
-**Dataset:** `names.txt` from Karpathy's makemore (~32K names, 18KB, auto-downloaded via urllib)
+**데이터셋:** Karpathy의 makemore에서 가져온 `names.txt` (~32K 이름, 18KB, urllib로 자동 다운로드)
 
-**Hyperparameters:** `n_embd=16, n_head=4, n_layer=1, block_size=16, lr=0.01, ~4,200 params`
+**하이퍼파라미터:** `n_embd=16, n_head=4, n_layer=1, block_size=16, lr=0.01, ~4,200 params`
 
-**Success criteria:**
+**성공 기준:**
 
-- Final loss: < 2.7 (character-level cross-entropy, single-document per step — stochastic, not averaged)
-- Generated names: ≥50% pronounceable English-like sequences
-- Runtime: < 7 minutes on M-series Mac
+- 최종 loss: < 2.7 (문자 단위 cross-entropy, 스텝당 단일 문서 — 확률적, 평균 아님)
+- 생성된 이름: 50% 이상이 발음 가능한 영어 유사 시퀀스
+- 런타임: M-series Mac에서 < 7분
 
 ---
 
-### `micrornn.py` — Recurrent Sequence Modeling
+### `micrornn.py` — 순환 시퀀스 모델링
 
-> _"Before attention conquered everything — how sequences were modeled with recurrence, and why gating was the breakthrough."_
+> _"어텐션이 모든 것을 정복하기 전 — 순환으로 시퀀스를 모델링한 방법, 그리고 게이팅이 왜 돌파구였는지."_
 
-**What it teaches:**
+**가르치는 것:**
 
-- The vanilla RNN: hidden state as a lossy compression of sequence history
-- Backpropagation through time (BPTT): unrolling the recurrence for gradient computation
-- The vanishing gradient problem: why vanilla RNNs fail on long sequences (demonstrated numerically, not just stated)
-- GRU gating: reset gate (what to forget) and update gate (what to keep)
-- Why gating solves the gradient problem: the update gate creates gradient highways
-- The historical arc from RNNs → GRUs/LSTMs → Transformers, and what each transition gained
+- Vanilla RNN: 시퀀스 히스토리의 손실 있는 압축으로서의 은닉 상태
+- Backpropagation through time (BPTT): 기울기 계산을 위한 순환 펼치기
+- 기울기 소실 문제: vanilla RNN이 긴 시퀀스에서 왜 실패하는지 (말로만 설명하는 게 아니라 수치적으로 시연)
+- GRU 게이팅: reset gate (무엇을 잊을지)와 update gate (무엇을 유지할지)
+- 게이팅이 기울기 문제를 해결하는 이유: update gate가 기울기 고속도로를 만듦
+- RNN → GRU/LSTM → Transformer의 역사적 흐름, 그리고 각 전환에서 얻은 것
 
-**Algorithm outline:**
+**알고리즘 개요:**
 
 ```
-1. Implement scalar autograd (reuse the Value class pattern)
-2. Implement a vanilla RNN:
+1. scalar autograd 구현 (Value class 패턴 재사용)
+2. Vanilla RNN 구현:
    a. h_t = tanh(W_xh @ x_t + W_hh @ h_{t-1} + b_h)
    b. y_t = W_hy @ h_t + b_y
-   c. Train on name generation, print loss curve
-   d. Print gradient norms at each timestep — show exponential decay
-3. Implement a GRU:
+   c. 이름 생성으로 학습, loss 곡선 출력
+   d. 각 타임스텝에서 기울기 norm 출력 — 지수적 감소를 보여줌
+3. GRU 구현:
    a. z_t = sigmoid(W_xz @ x_t + W_hz @ h_{t-1})      # update gate
    b. r_t = sigmoid(W_xr @ x_t + W_hr @ h_{t-1})      # reset gate
    c. h_candidate = tanh(W_xh @ x_t + W_hh @ (r_t * h_{t-1}))
    d. h_t = (1 - z_t) * h_{t-1} + z_t * h_candidate
-   e. Train on same data, print loss curve
-   f. Print gradient norms — show stable gradients through gating
-4. Compare: final loss, gradient health, generated name quality
-5. Inference: generate names from both models side by side
+   e. 같은 데이터로 학습, loss 곡선 출력
+   f. 기울기 norm 출력 — 게이팅을 통한 안정적 기울기를 보여줌
+4. 비교: 최종 loss, 기울기 건강도, 생성된 이름 품질
+5. 추론: 양쪽 모델에서 이름을 나란히 생성
 ```
 
-**Dataset:** `names.txt` — same task as `microgpt.py` for direct comparison across architectures.
+**데이터셋:** `names.txt` — 아키텍처 간 직접 비교를 위해 `microgpt.py`와 같은 태스크.
 
-**Key implementation details:**
+**핵심 구현 사항:**
 
-- Both models train on identical data with identical hyperparameters — the only variable is the architecture
-- Gradient norm tracking is the core pedagogical tool: print `||dL/dh_t||` at each timestep for a sample sequence to make vanishing gradients visible, not just theoretical
-- Sigmoid implemented in the autograd: `sigmoid(x) = 1 / (1 + exp(-x))`
-- The GRU is chosen over LSTM because it has fewer gates (2 vs. 3) and is easier to follow in scalar autograd, while teaching the same gating principle
-- Hidden state dimension kept small (`n_hidden=32`) for tractability
-- Include a direct comparison table at the end: architecture, final loss, gradient norm ratio (first vs. last timestep), sample outputs
+- 두 모델 모두 동일한 데이터와 동일한 하이퍼파라미터로 학습 — 유일한 변수는 아키텍처
+- 기울기 norm 추적이 핵심 교육 도구: 샘플 시퀀스에 대해 각 타임스텝의 `||dL/dh_t||`를 출력하여 기울기 소실을 이론이 아닌 눈으로 확인 가능하게 함
+- Sigmoid은 autograd 안에서 구현: `sigmoid(x) = 1 / (1 + exp(-x))`
+- LSTM 대신 GRU를 선택한 이유: 게이트가 더 적고 (2개 vs. 3개) scalar autograd에서 따라가기 쉬우면서, 같은 게이팅 원리를 가르침
+- 은닉 상태 차원은 처리 가능하도록 작게 유지 (`n_hidden=32`)
+- 마지막에 직접 비교 표를 포함: 아키텍처, 최종 loss, 기울기 norm 비율 (첫 번째 vs. 마지막 타임스텝), 샘플 출력
 
-**Historical context note:** This script exists to provide the "before" picture. Karpathy's [makemore](https://github.com/karpathy/makemore) series walks through this progression across multiple notebooks. Here, both models live in one file so the comparison is immediate and inescapable.
+**역사적 맥락 참고:** 이 스크립트는 "이전" 그림을 제공하기 위해 존재함. Karpathy의 [makemore](https://github.com/karpathy/makemore) 시리즈는 여러 노트북에 걸쳐 이 진행을 다룸. 여기서는 두 모델이 하나의 파일에 있어서 비교가 즉각적이고 피할 수 없음.
 
-**Hyperparameters:** `n_hidden=32, seq_len=16, lr=0.1 (SGD), steps=3000 per model, ~800 params (RNN), ~800 params (GRU)`
+**하이퍼파라미터:** `n_hidden=32, seq_len=16, lr=0.1 (SGD), steps=3000 per model, ~800 params (RNN), ~800 params (GRU)`
 
-**Success criteria:**
+**성공 기준:**
 
-- Vanilla RNN gradient norm ratio (last/first timestep): < 0.01 (demonstrates vanishing)
-- GRU gradient norm ratio: 0.1–10.0 (demonstrates stability)
-- GRU final loss < vanilla RNN final loss
-- Generated names from GRU are higher quality than vanilla RNN
-- Runtime: < 9 minutes on M-series Mac
+- Vanilla RNN 기울기 norm 비율 (마지막/첫 번째 타임스텝): < 0.01 (소실을 시연)
+- GRU 기울기 norm 비율: 0.1–10.0 (안정성을 시연)
+- GRU 최종 loss < vanilla RNN 최종 loss
+- GRU에서 생성된 이름이 vanilla RNN보다 높은 품질
+- 런타임: M-series Mac에서 < 9분
 
-**Expected complexity:** ~350-400 lines. Two model implementations + gradient analysis + comparative inference.
+**예상 복잡도:** ~350-400줄. 두 모델 구현 + 기울기 분석 + 비교 추론.
 
 ---
 
 ### `microtokenizer.py` — Byte-Pair Encoding
 
-> _"How text becomes numbers — the compression algorithm hiding inside every LLM."_
+> _"텍스트가 숫자가 되는 방법 — 모든 LLM 안에 숨어 있는 압축 알고리즘."_
 
-**What it teaches:**
+**가르치는 것:**
 
-- Why tokenization matters (vocabulary efficiency, subword representation)
-- The BPE merge algorithm: iterative pair frequency counting and merging
-- Encoding: greedy left-to-right application of learned merges
-- Decoding: simple lookup from token IDs back to byte sequences
-- The relationship between vocabulary size and sequence length
+- 토큰화가 중요한 이유 (어휘 효율성, 서브워드 표현)
+- BPE merge 알고리즘: 반복적 쌍 빈도 계산과 병합
+- 인코딩: 학습된 merge의 탐욕적 좌→우 적용
+- 디코딩: token ID에서 바이트 시퀀스로의 단순 조회
+- 어휘 크기와 시퀀스 길이의 관계
 
-**Algorithm outline:**
+**알고리즘 개요:**
 
 ```
-1. Start with byte-level vocabulary (256 base tokens)
-2. Count all adjacent token pairs in the corpus
-3. Merge the most frequent pair into a new token
-4. Repeat for N merges (N controls vocab size)
-5. Encoding: apply merges greedily to new text
-6. Decoding: map token IDs back to byte strings
+1. 바이트 수준 어휘로 시작 (256개 기본 토큰)
+2. 코퍼스에서 모든 인접 토큰 쌍을 카운트
+3. 가장 빈번한 쌍을 새 토큰으로 병합
+4. N번의 merge를 반복 (N이 어휘 크기를 제어)
+5. 인코딩: 새 텍스트에 merge를 탐욕적으로 적용
+6. 디코딩: token ID를 바이트 문자열로 매핑
 ```
 
-**Dataset:** `names.txt` from Karpathy's makemore (~32K names, auto-downloaded via urllib)
+**데이터셋:** Karpathy의 makemore에서 가져온 `names.txt` (~32K 이름, urllib로 자동 다운로드)
 
-**Key implementation details:**
+**핵심 구현 사항:**
 
-- Maintain a merge priority table (ordered list of merges)
-- Encoding applies merges in priority order, not frequency order on new text
-- Handle UTF-8 properly: base vocabulary is bytes (0-255), not characters
-- Show compression ratio before/after tokenization
+- merge 우선순위 테이블 유지 (정렬된 merge 목록)
+- 인코딩은 새 텍스트에서 빈도 순이 아닌 우선순위 순으로 merge를 적용
+- UTF-8을 제대로 처리: 기본 어휘는 문자가 아닌 바이트 (0-255)
+- 토큰화 전/후 압축 비율을 보여줌
 
-**Success criteria:**
+**성공 기준:**
 
-- Round-trip correctness: `decode(encode(text)) == text` for all test inputs
-- Compression ratio: ≥1.5x reduction in token count vs. byte-level encoding
-- Runtime: < 2 minutes on M-series Mac
+- 왕복 정확성: 모든 테스트 입력에 대해 `decode(encode(text)) == text`
+- 압축 비율: 바이트 수준 인코딩 대비 토큰 수 1.5배 이상 감소
+- 런타임: M-series Mac에서 < 2분
 
-**Expected complexity:** ~150-200 lines. Straightforward algorithm, main challenge is clean encode/decode symmetry.
+**예상 복잡도:** ~150-200줄. 직관적인 알고리즘, 주된 도전은 깔끔한 encode/decode 대칭.
 
 ---
 
-### `microembedding.py` — Contrastive Embedding Learning
+### `microembedding.py` — 대조 임베딩 학습
 
-> _"How meaning becomes geometry — training vectors where distance equals similarity."_
+> _"의미가 기하학이 되는 방법 — 거리가 유사도와 같은 벡터를 학습함."_
 
-**What it teaches:**
+**가르치는 것:**
 
-- Why learned embeddings outperform bag-of-words and TF-IDF for semantic tasks
-- Contrastive learning with InfoNCE / NT-Xent loss
-- Positive and negative pair construction
-- Temperature scaling in contrastive objectives
-- Cosine similarity as the learned distance metric
-- How embedding spaces organize semantically
+- 학습된 임베딩이 bag-of-words와 TF-IDF보다 의미적 태스크에서 우수한 이유
+- InfoNCE / NT-Xent loss를 사용한 대조 학습
+- 양성 및 음성 쌍 구성
+- 대조 목적 함수에서의 temperature scaling
+- 학습된 거리 메트릭으로서의 cosine similarity
+- 임베딩 공간이 의미적으로 조직되는 방식
 
-**Algorithm outline:**
+**알고리즘 개요:**
 
 ```
-1. Define a simple encoder (bag-of-character-ngrams → linear projection)
-2. Construct training pairs:
-   - Positive: augmented versions of the same document (e.g., character dropout)
-   - Negative: other documents in the batch
-3. Compute embeddings for all pairs
-4. Apply InfoNCE loss: maximize similarity of positives, minimize similarity of negatives
-5. Train with SGD/Adam
-6. Inference: embed new strings and find nearest neighbors
+1. 간단한 인코더 정의 (bag-of-character-ngrams → linear projection)
+2. 학습 쌍 구성:
+   - 양성: 같은 문서의 증강 버전 (예: 문자 드롭아웃)
+   - 음성: 배치 내 다른 문서들
+3. 모든 쌍에 대해 임베딩 계산
+4. InfoNCE loss 적용: 양성의 유사도 최대화, 음성의 유사도 최소화
+5. SGD/Adam으로 학습
+6. 추론: 새 문자열을 임베딩하고 최근접 이웃 찾기
 ```
 
-**Dataset:** `names.txt` — embed names into a space where similar-sounding names cluster together
+**데이터셋:** `names.txt` — 비슷한 발음의 이름이 함께 클러스터링되는 공간에 이름을 임베딩
 
-**Key implementation details:**
+**핵심 구현 사항:**
 
-- Character n-gram features as input representation (no learned tokenizer dependency)
-- Simple linear encoder (matrix multiply + normalize), no deep network needed
-- Augmentation via random character deletion/swap to create positive pairs
-- Cosine similarity computed manually: `dot(a,b) / (||a|| * ||b||)`
-- Demonstrate nearest-neighbor retrieval at inference time
+- 입력 표현으로 character n-gram 특징 사용 (학습된 tokenizer 의존성 없음)
+- 간단한 linear 인코더 (행렬 곱 + 정규화), 딥 네트워크 불필요
+- 양성 쌍 생성을 위한 랜덤 문자 삭제/교환 증강
+- Cosine similarity 수동 계산: `dot(a,b) / (||a|| * ||b||)`
+- 추론 시 최근접 이웃 검색을 시연
 
-**Success criteria:**
+**성공 기준:**
 
-- Nearest neighbors have low edit distance (e.g., "Anna" → "Anne", not "Anna" → "Zachary")
-- Cosine similarity between positive pairs > 0.8 after training
-- Cosine similarity between random pairs < 0.3 after training
-- Runtime: < 5 minutes on M-series Mac
+- 최근접 이웃이 낮은 편집 거리를 가짐 (예: "Anna" → "Anne", "Anna" → "Zachary" 아님)
+- 학습 후 양성 쌍 간 cosine similarity > 0.8
+- 학습 후 랜덤 쌍 간 cosine similarity < 0.3
+- 런타임: M-series Mac에서 < 5분
 
-**Expected complexity:** ~200-250 lines. The loss function is the core; the encoder can stay simple.
+**예상 복잡도:** ~200-250줄. loss 함수가 핵심; 인코더는 간단하게 유지 가능.
 
 ---
 
 ### `microrag.py` — Retrieval-Augmented Generation
 
-> _"How retrieval augments generation — the simplest system that actually works."_
+> _"검색이 생성을 보강하는 방법 — 실제로 작동하는 가장 단순한 시스템."_
 
-**What it teaches:**
+**가르치는 것:**
 
-- The RAG architecture: retrieve-then-generate
-- TF-IDF or BM25 scoring for document retrieval
-- How retrieved context is injected into a generative model's input
-- The fundamental tradeoff between parametric knowledge (model weights) and non-parametric knowledge (retrieved documents)
-- Why RAG reduces hallucination
+- RAG 아키텍처: 검색 후 생성
+- 문서 검색을 위한 TF-IDF 또는 BM25 스코어링
+- 검색된 컨텍스트가 생성 모델의 입력에 주입되는 방법
+- 파라메트릭 지식(모델 가중치)과 비파라메트릭 지식(검색된 문서) 사이의 근본적인 트레이드오프
+- RAG가 환각을 줄이는 이유
 
-**Algorithm outline:**
+**알고리즘 개요:**
 
 ```
-1. Build a document index:
-   - Tokenize documents into terms
-   - Compute TF-IDF (or BM25) scores
-   - Store as an inverted index
-2. At query time:
-   - Score all documents against the query
-   - Retrieve top-k documents
-3. Concatenate retrieved context with the query
-4. Feed the augmented input into a small trained language model
-5. Generate output conditioned on both the query and retrieved context
+1. 문서 인덱스 구축:
+   - 문서를 용어로 토큰화
+   - TF-IDF (또는 BM25) 점수 계산
+   - 역색인으로 저장
+2. 쿼리 시점:
+   - 모든 문서를 쿼리에 대해 스코어링
+   - 상위 k개 문서 검색
+3. 검색된 컨텍스트를 쿼리와 연결
+4. 보강된 입력을 작은 학습된 언어 모델에 입력
+5. 쿼리와 검색된 컨텍스트 모두에 조건화된 출력을 생성
 ```
 
-**Dataset:** 100 synthetic factual paragraphs (cities, countries, basic facts). Generated programmatically within the script — no download needed. Simple enough to verify retrieval quality by inspection.
+**데이터셋:** 100개의 합성 사실 문단 (도시, 국가, 기본 사실). 스크립트 내에서 프로그래밍적으로 생성 — 다운로드 불필요. 검색 품질을 육안으로 검증할 수 있을 만큼 단순함.
 
-**Key implementation details:**
+**핵심 구현 사항:**
 
-- BM25 implemented from scratch: term frequency saturation, document length normalization, IDF weighting
-- The language model is a **character-level MLP** with concatenated input (`embed(query) + embed(retrieved_context)`). A bigram model cannot condition on retrieved context and would fail to demonstrate RAG's core mechanism.
-- Demonstrate: same query with and without retrieval, showing improved accuracy
-- The retrieval and generation components must both be implemented in the same file
+- BM25를 처음부터 구현: term frequency 포화, 문서 길이 정규화, IDF 가중치
+- 언어 모델은 연결된 입력(`embed(query) + embed(retrieved_context)`)을 사용하는 **문자 수준 MLP**임. bigram 모델은 검색된 컨텍스트에 조건화할 수 없어서 RAG의 핵심 메커니즘을 시연하는 데 실패함.
+- 시연: 검색 유무에 따른 같은 쿼리, 향상된 정확도를 보여줌
+- 검색과 생성 컴포넌트 모두 같은 파일에 구현되어야 함
 
-**Design decision:** The MLP accepts concatenated query + retrieved context as input, enabling the model to actually use retrieved information. This is the minimum architecture that meaningfully demonstrates RAG. The focus is on the retrieval mechanism and context injection, not on the generative model's sophistication.
+**설계 결정:** MLP는 연결된 쿼리 + 검색된 컨텍스트를 입력으로 받아서, 모델이 실제로 검색된 정보를 사용할 수 있게 함. 이것이 RAG를 의미 있게 시연하는 최소 아키텍처임. 초점은 검색 메커니즘과 컨텍스트 주입에 있지, 생성 모델의 정교함에 있지 않음.
 
-**Success criteria:**
+**성공 기준:**
 
-- Retrieval: BM25 returns relevant documents for ≥80% of test queries
-- Generation with retrieval produces measurably better outputs than without retrieval
-- Runtime: < 6 minutes on M-series Mac
+- 검색: BM25가 테스트 쿼리의 80% 이상에 대해 관련 문서를 반환
+- 검색 포함 생성이 검색 미포함보다 측정 가능하게 더 나은 출력을 생산
+- 런타임: M-series Mac에서 < 6분
 
-**Expected complexity:** ~350-400 lines. Most complex foundational script due to having two subsystems (BM25 + MLP).
+**예상 복잡도:** ~350-400줄. 두 서브시스템(BM25 + MLP)이 있어서 기초 스크립트 중 가장 복잡함.
 
 ---
 
 ### `microdiffusion.py` — Denoising Diffusion
 
-> _"How images emerge from noise — the algorithm behind Stable Diffusion, in 2D."_
+> _"노이즈에서 이미지가 나타나는 방법 — Stable Diffusion 뒤의 알고리즘, 2D로."_
 
-**What it teaches:**
+**가르치는 것:**
 
-- The forward process: progressively adding Gaussian noise to data
-- The reverse process: learning to predict and remove noise
-- Noise schedule (linear beta schedule)
-- The denoising objective: predict the noise that was added
-- Sampling: iterative denoising from pure noise to data
+- 순방향 과정: 데이터에 가우시안 노이즈를 점진적으로 추가
+- 역방향 과정: 노이즈를 예측하고 제거하는 것을 학습
+- 노이즈 스케줄 (linear beta schedule)
+- 디노이징 목적: 추가된 노이즈를 예측
+- 샘플링: 순수 노이즈에서 데이터로 반복 디노이징
 
-**Algorithm outline:**
+**알고리즘 개요:**
 
 ```
-1. Define a tiny 2D dataset (e.g., points sampled from a spiral or Swiss roll)
-2. Forward process: add noise at T timesteps with a linear schedule
-3. Train a small MLP to predict the noise given (noisy_data, timestep)
-4. Sampling: start from random noise, iteratively denoise for T steps
-5. Visualize: print the generated 2D points (or their statistics)
+1. 작은 2D 데이터셋 정의 (예: 나선형 또는 Swiss roll에서 샘플링된 점들)
+2. 순방향 과정: T 타임스텝에서 linear schedule로 노이즈 추가
+3. 작은 MLP를 학습시켜 (noisy_data, timestep)이 주어졌을 때 노이즈를 예측
+4. 샘플링: 랜덤 노이즈에서 시작, T 스텝 동안 반복 디노이징
+5. 시각화: 생성된 2D 점들 (또는 통계)을 출력
 ```
 
-**Dataset:** Synthetic — 2D point clouds (spiral, concentric circles, Swiss roll). Generated programmatically, no download needed.
+**데이터셋:** 합성 — 2D 포인트 클라우드 (나선형, 동심원, Swiss roll). 프로그래밍적으로 생성, 다운로드 불필요.
 
-**Key implementation details:**
+**핵심 구현 사항:**
 
-- 2D data keeps the model tiny (MLP with ~1000 params) while preserving all algorithmic structure
-- Linear noise schedule: `beta_t` linearly interpolated from `beta_1` to `beta_T`
-- Precompute `alpha_bar_t` for efficient noising at arbitrary timesteps
-- The denoising network takes `[x_noisy, t_embedding]` as input
-- Timestep embedding via sinusoidal encoding (implemented manually)
-- Output: statistics of generated points (mean, variance, distribution shape) printed to stdout
+- 2D 데이터는 모델을 작게 유지(~1000 params MLP)하면서 모든 알고리즘 구조를 보존
+- Linear 노이즈 스케줄: `beta_t`를 `beta_1`에서 `beta_T`까지 선형 보간
+- 임의 타임스텝에서 효율적 노이징을 위해 `alpha_bar_t`를 사전 계산
+- 디노이징 네트워크는 `[x_noisy, t_embedding]`을 입력으로 받음
+- Sinusoidal encoding으로 타임스텝 임베딩 (수동 구현)
+- 출력: 생성된 점들의 통계 (평균, 분산, 분포 형태)를 stdout에 출력
 
-**2D-to-image mapping:** The algorithm is identical to image diffusion (Stable Diffusion, DALL-E). 2D coordinates map to pixel values, the 1000-param MLP maps to a billion-param U-Net, and Gaussian noise on (x,y) maps to Gaussian noise on RGB. The core insight — learn to predict noise, then iteratively denoise — is the same at any dimensionality. Comments must make this mapping explicit.
+**2D-이미지 매핑:** 알고리즘은 이미지 diffusion (Stable Diffusion, DALL-E)과 동일함. 2D 좌표가 픽셀 값에 매핑되고, 1000-param MLP가 10억-param U-Net에 매핑되며, (x,y)에 대한 가우시안 노이즈가 RGB에 대한 가우시안 노이즈에 매핑됨. 핵심 통찰 — 노이즈를 예측하는 법을 학습한 다음, 반복적으로 디노이징 — 은 어떤 차원에서나 동일함. 주석이 이 매핑을 명시적으로 밝혀야 함.
 
-**Success criteria:**
+**성공 기준:**
 
-- Generated point cloud statistics (mean, variance) match training distribution within 20%
-- Visual inspection: generated spiral/Swiss roll is recognizable as the target shape
-- Runtime: < 5 minutes on M-series Mac
+- 생성된 포인트 클라우드 통계 (평균, 분산)가 학습 분포와 20% 이내로 일치
+- 육안 검사: 생성된 나선형/Swiss roll이 대상 형태로 인식 가능
+- 런타임: M-series Mac에서 < 5분
 
-**Expected complexity:** ~250-300 lines. The 2D simplification makes this tractable without any image libraries.
+**예상 복잡도:** ~250-300줄. 2D 단순화로 이미지 라이브러리 없이 처리 가능.
 
 ---
 
 ### `microvae.py` — Variational Autoencoder
 
-> _"How to learn a compressed, generative representation of data — the reparameterization trick demystified."_
+> _"데이터의 압축된 생성적 표현을 학습하는 방법 — reparameterization trick 해체."_
 
-**What it teaches:**
+**가르치는 것:**
 
-- Encoder-decoder architecture for unsupervised learning
-- The reparameterization trick: backpropagating through sampling
-- ELBO loss: reconstruction loss + KL divergence regularization
-- Latent space interpolation and generation
-- Why VAEs produce blurry but diverse outputs (vs. GANs)
+- 비지도 학습을 위한 인코더-디코더 아키텍처
+- Reparameterization trick: 샘플링을 통한 역전파
+- ELBO loss: 재구성 loss + KL divergence 정규화
+- 잠재 공간 보간과 생성
+- VAE가 흐릿하지만 다양한 출력을 생성하는 이유 (GAN과 대비)
 
-**Algorithm outline:**
+**알고리즘 개요:**
 
 ```
-1. Define a tiny dataset (2D points or small discrete sequences)
-2. Encoder: maps input → (mean, log_variance) of latent distribution
-3. Reparameterize: z = mean + exp(0.5 * log_var) * epsilon, where epsilon ~ N(0,1)
-4. Decoder: maps z → reconstructed input
+1. 작은 데이터셋 정의 (2D 점들 또는 작은 이산 시퀀스)
+2. 인코더: 입력 → 잠재 분포의 (mean, log_variance) 매핑
+3. Reparameterize: z = mean + exp(0.5 * log_var) * epsilon, 여기서 epsilon ~ N(0,1)
+4. 디코더: z → 재구성된 입력 매핑
 5. Loss = reconstruction_loss + beta * KL(q(z|x) || p(z))
-6. Train with Adam
-7. Inference: sample z ~ N(0,1), decode to generate new data
+6. Adam으로 학습
+7. 추론: z ~ N(0,1) 샘플링, 디코드하여 새 데이터 생성
 ```
 
-**Dataset:** Synthetic 2D distributions or the same names dataset (character-level VAE).
+**데이터셋:** 합성 2D 분포 또는 같은 names 데이터셋 (문자 수준 VAE).
 
-**Key implementation details:**
+**핵심 구현 사항:**
 
-- The reparameterization trick must be explicit — this is the entire pedagogical point
-- KL divergence for Gaussian has a closed-form solution: `0.5 * sum(1 + log_var - mean^2 - exp(log_var))`
-- Demonstrate latent space interpolation between two data points
-- Beta-VAE weighting to show the reconstruction/regularization tradeoff
+- Reparameterization trick이 명시적이어야 함 — 이것이 교육적 핵심
+- 가우시안에 대한 KL divergence는 닫힌 형태의 해가 있음: `0.5 * sum(1 + log_var - mean^2 - exp(log_var))`
+- 두 데이터 포인트 간 잠재 공간 보간을 시연
+- 재구성/정규화 트레이드오프를 보여주기 위한 Beta-VAE 가중치
 
-**Success criteria:**
+**성공 기준:**
 
-- Reconstruction loss decreases over training (ELBO improves)
-- KL divergence is positive and bounded (not collapsed to 0 or exploded)
-- Latent interpolation produces smooth transitions between data points
-- Generated samples from z ~ N(0,1) resemble training distribution
-- Runtime: < 4 minutes on M-series Mac
+- 학습에 걸쳐 재구성 loss가 감소 (ELBO 개선)
+- KL divergence가 양수이고 유한 (0으로 붕괴하거나 폭발하지 않음)
+- 잠재 보간이 데이터 포인트 간 매끄러운 전이를 생성
+- z ~ N(0,1)에서 생성된 샘플이 학습 분포와 유사
+- 런타임: M-series Mac에서 < 4분
 
-**Expected complexity:** ~200-250 lines. Conceptually elegant; the tricky part is making the reparameterization trick crystal clear in code.
+**예상 복잡도:** ~200-250줄. 개념적으로 우아함; 까다로운 부분은 reparameterization trick을 코드에서 결정적으로 명확하게 만드는 것.
 
 ---
 
-## 02 — Alignment & Training Techniques
+## 02 — 정렬 & 학습 기법
 
 ### `microlora.py` — Low-Rank Adaptation
 
-> _"How to fine-tune a model by updating 1% of its parameters — the math behind efficient adaptation."_
+> _"파라미터의 1%만 업데이트하여 모델을 파인튜닝하는 방법 — 효율적 적응 뒤의 수학."_
 
-**What it teaches:**
+**가르치는 것:**
 
-- Why full fine-tuning is expensive (all parameters, all gradients, all optimizer states)
-- Low-rank decomposition: `W_new = W_frozen + A @ B` where A and B are small
-- Why low rank works (weight updates during fine-tuning are empirically low-rank)
-- Freezing base weights vs. training adapter weights
-- Rank as a hyperparameter: capacity vs. efficiency tradeoff
+- 전체 파인튜닝이 비싼 이유 (모든 파라미터, 모든 기울기, 모든 옵티마이저 상태)
+- Low-rank 분해: `W_new = W_frozen + A @ B` 여기서 A와 B는 작음
+- Low rank가 작동하는 이유 (파인튜닝 중 가중치 업데이트는 경험적으로 low-rank)
+- 기본 가중치 동결 vs. 어댑터 가중치 학습
+- Rank를 하이퍼파라미터로: 용량 vs. 효율 트레이드오프
 
-**Algorithm outline:**
+**알고리즘 개요:**
 
 ```
-1. Train a base model (reuse microgpt architecture) on dataset A
-2. Freeze all base model parameters
-3. For selected weight matrices, add low-rank adapters: A (d×r) and B (r×d), r << d
-4. Forward pass: output = W_frozen @ x + A @ B @ x
-5. Only A and B receive gradients
-6. Train on dataset B (different distribution)
-7. Show: adapted model performs on B without forgetting A
+1. 데이터셋 A에서 기본 모델 학습 (microgpt 아키텍처 재사용)
+2. 모든 기본 모델 파라미터 동결
+3. 선택된 가중치 행렬에 low-rank 어댑터 추가: A (d×r)와 B (r×d), r << d
+4. 순전파: output = W_frozen @ x + A @ B @ x
+5. A와 B만 기울기를 받음
+6. 데이터셋 B (다른 분포)로 학습
+7. 보여줌: 적응된 모델이 A를 잊지 않으면서 B에서 수행함
 ```
 
-**Dataset:** Two splits of `names.txt` — e.g., names starting A-M as base, N-Z as adaptation target. Or: English names as base, a different name list as adaptation.
+**데이터셋:** `names.txt`의 두 분할 — 예: A-M으로 시작하는 이름은 기본, N-Z는 적응 대상. 또는: 영어 이름을 기본으로, 다른 이름 목록을 적응으로.
 
-**Key implementation details:**
+**핵심 구현 사항:**
 
-- Base model trains first (reusing the microgpt loop)
-- Adapter matrices initialized: A ~ N(0, σ), B = 0 (so initial adaptation is zero)
-- Explicit gradient freezing: base `Value` nodes have their `.grad` reset to 0 after backward
-- Compare: trainable parameter count with vs. without LoRA
-- Show generation quality on both the base and adapted distributions
+- 기본 모델이 먼저 학습됨 (microgpt 루프 재사용)
+- 어댑터 행렬 초기화: A ~ N(0, σ), B = 0 (초기 적응이 영)
+- 명시적 기울기 동결: 기본 `Value` 노드는 backward 후 `.grad`가 0으로 리셋
+- 비교: LoRA 유무에 따른 학습 가능 파라미터 수
+- 기본 및 적응 분포 모두에서 생성 품질을 보여줌
 
-**Success criteria:**
+**성공 기준:**
 
-- Base model converges on dataset A (loss < 2.5)
-- LoRA-adapted model improves on dataset B without catastrophic forgetting on A
-- Trainable parameter count with LoRA < 10% of full model parameters
-- Runtime: < 7 minutes on M-series Mac (base: 3 min to 50% convergence + LoRA: 2 min + inference: 1 min)
+- 기본 모델이 데이터셋 A에서 수렴 (loss < 2.5)
+- LoRA 적응 모델이 A에서의 치명적 망각 없이 데이터셋 B에서 개선
+- LoRA를 사용한 학습 가능 파라미터 수 < 전체 모델 파라미터의 10%
+- 런타임: M-series Mac에서 < 7분 (기본: 50% 수렴까지 3분 + LoRA: 2분 + 추론: 1분)
 
-**Expected complexity:** ~350-400 lines. Includes both base training and LoRA adaptation phases.
+**예상 복잡도:** ~350-400줄. 기본 학습과 LoRA 적응 단계를 모두 포함.
 
 ---
 
 ### `microdpo.py` — Direct Preference Optimization
 
-> _"How to align a model with human preferences without training a separate reward model."_
+> _"별도의 보상 모델을 학습하지 않고 인간 선호도에 맞게 모델을 정렬하는 방법."_
 
-**What it teaches:**
+**가르치는 것:**
 
-- The preference learning problem: given (prompt, chosen, rejected), make the model prefer "chosen"
-- Why DPO simplifies RLHF: the optimal policy has a closed-form relationship to the reward
-- The DPO loss function: a contrastive objective over log-probability ratios
-- The role of the reference model (KL anchor)
-- Beta parameter: how strongly preferences override the base distribution
+- 선호도 학습 문제: (prompt, chosen, rejected)가 주어졌을 때, 모델이 "chosen"을 선호하게 만드는 것
+- DPO가 RLHF를 단순화하는 이유: 최적 정책은 보상과 닫힌 형태의 관계를 가짐
+- DPO loss 함수: log-probability 비율에 대한 대조 목적 함수
+- 참조 모델의 역할 (KL 앵커)
+- Beta 파라미터: 선호도가 기본 분포를 얼마나 강하게 오버라이드하는지
 
-**Algorithm outline:**
+**알고리즘 개요:**
 
 ```
-1. Train a base/reference model on a text corpus
-2. Create preference pairs: (prompt, chosen_completion, rejected_completion)
-3. Compute log-probabilities of chosen and rejected under both the policy and reference model
+1. 텍스트 코퍼스에서 기본/참조 모델 학습
+2. 선호도 쌍 생성: (prompt, chosen_completion, rejected_completion)
+3. 정책과 참조 모델 모두에서 chosen과 rejected의 log-probability 계산
 4. DPO loss: -log(sigmoid(beta * (log_ratio_chosen - log_ratio_rejected)))
-5. Update only the policy model
-6. Show: generation shifts toward preferred completions
+5. 정책 모델만 업데이트
+6. 보여줌: 생성이 선호 완성 쪽으로 이동
 ```
 
-**Dataset:** Synthetic preference pairs derived from `names.txt` — e.g., prefer names with certain phonetic properties, or prefer longer names over shorter ones. The preference signal should be simple enough to verify visually.
+**데이터셋:** `names.txt`에서 파생된 합성 선호도 쌍 — 예: 특정 음성적 특성을 가진 이름을 선호, 또는 짧은 이름보다 긴 이름을 선호. 선호 신호는 육안으로 검증할 수 있을 만큼 단순해야 함.
 
-**Key implementation details:**
+**핵심 구현 사항:**
 
-- Reference model is a frozen copy of the base model's parameters
-- Log-probability computation requires full sequence scoring (sum of per-token log-probs)
-- The sigmoid and log-ratio math must be numerically stable
-- Beta controls alignment strength — demonstrate with different values
-- Show: KL divergence between policy and reference increases with training
+- 참조 모델은 기본 모델 파라미터의 동결된 복사본
+- Log-probability 계산은 전체 시퀀스 스코어링 필요 (토큰별 log-prob의 합)
+- Sigmoid과 log-ratio 수학은 수치적으로 안정적이어야 함
+- Beta가 정렬 강도를 제어 — 다른 값으로 시연
+- 보여줌: 학습에 따라 정책과 참조 간 KL divergence가 증가
 
-**Success criteria:**
+**성공 기준:**
 
-- DPO loss decreases over training
-- Policy model generates preferred completions more frequently than rejected ones
-- KL divergence between policy and reference increases with training (controlled by beta)
-- Runtime: < 7 minutes on M-series Mac (pretrain: 3 min + DPO: 3 min + inference: 1 min)
+- 학습에 걸쳐 DPO loss가 감소
+- 정책 모델이 기각된 것보다 선호 완성을 더 빈번하게 생성
+- 정책과 참조 간 KL divergence가 학습에 따라 증가 (beta로 제어)
+- 런타임: M-series Mac에서 < 7분 (사전학습: 3분 + DPO: 3분 + 추론: 1분)
 
-**Expected complexity:** ~350-400 lines. Requires two model copies (reference + policy) and preference pair construction.
+**예상 복잡도:** ~350-400줄. 두 모델 복사본(참조 + 정책)과 선호도 쌍 구성이 필요.
 
 ---
 
 ### `microppo.py` — Proximal Policy Optimization for RLHF
 
-> _"The full RLHF loop: reward model, policy gradient, KL penalty — all in one file."_
+> _"전체 RLHF 루프: 보상 모델, policy gradient, KL 페널티 — 하나의 파일에 전부."_
 
-**What it teaches:**
+**가르치는 것:**
 
-- The RLHF pipeline: pretrain → reward model → policy optimization
-- Reward model training from preference pairs
-- Policy gradient with a clipped surrogate objective (PPO)
-- KL penalty to prevent the policy from diverging too far from the reference
-- Value function baseline for variance reduction
-- Why this is harder than DPO (and when you'd still want it)
+- RLHF 파이프라인: 사전학습 → 보상 모델 → 정책 최적화
+- 선호도 쌍으로부터의 보상 모델 학습
+- Clipped surrogate objective를 사용한 policy gradient (PPO)
+- 정책이 참조에서 너무 멀어지는 것을 방지하는 KL 페널티
+- 분산 감소를 위한 value function baseline
+- 이것이 DPO보다 어려운 이유 (그리고 언제 여전히 이것을 원할 것인지)
 
-**Algorithm outline:**
+**알고리즘 개요:**
 
 ```
-1. Train a base language model (pretrain phase)
-2. Train a reward model on preference pairs:
-   - Input: (prompt, completion) → scalar reward score
-   - Trained with pairwise ranking loss
-3. PPO loop:
-   a. Generate completions from the current policy
-   b. Score completions with the reward model
-   c. Compute advantages (reward - value baseline)
-   d. Update policy with clipped surrogate objective
-   e. Update value function
-   f. Apply KL penalty against the reference policy
-4. Show: generation quality improves according to reward signal
+1. 기본 언어 모델 학습 (사전학습 단계)
+2. 선호도 쌍으로 보상 모델 학습:
+   - 입력: (prompt, completion) → scalar 보상 점수
+   - Pairwise ranking loss로 학습
+3. PPO 루프:
+   a. 현재 정책에서 완성 생성
+   b. 보상 모델로 완성 점수 매기기
+   c. 이점 계산 (보상 - value baseline)
+   d. Clipped surrogate objective로 정책 업데이트
+   e. Value function 업데이트
+   f. 참조 정책에 대한 KL 페널티 적용
+4. 보여줌: 보상 신호에 따라 생성 품질 향상
 ```
 
-**Dataset:** Same synthetic preference setup as `microdpo.py` for comparability.
+**데이터셋:** 비교 가능성을 위해 `microdpo.py`와 같은 합성 선호도 설정.
 
-**Key implementation details:**
+**핵심 구현 사항:**
 
-- **Hybrid autograd approach:** The policy model uses scalar autograd (`Value` class) because PPO gradients must flow through the policy. The reward model and value function use plain float arrays with manual gradient computation — they are trained separately before the PPO loop, so autograd overhead is unnecessary. This preserves the full RLHF algorithm while meeting runtime constraints.
-- Policy: scalar autograd, ~1,000 params (`n_embd=8, n_head=2, n_layer=1`)
-- Reward model: plain float MLP, ~500 params, trained with pairwise ranking loss
-- Value function: plain float linear, ~200 params
+- **Hybrid autograd 접근:** 정책 모델은 scalar autograd (`Value` class)를 사용. PPO 기울기가 정책을 통해 흘러야 하기 때문. 보상 모델과 value function은 수동 기울기 계산이 포함된 일반 float 배열 사용 — PPO 루프 전에 별도로 학습되므로, autograd 오버헤드가 불필요함. 런타임 제약 내에서 전체 RLHF 알고리즘을 보존함.
+- 정책: scalar autograd, ~1,000 params (`n_embd=8, n_head=2, n_layer=1`)
+- 보상 모델: 일반 float MLP, ~500 params, pairwise ranking loss로 학습
+- Value function: 일반 float linear, ~200 params
 - PPO clipping: `min(ratio * advantage, clip(ratio, 1-ε, 1+ε) * advantage)`
-- KL penalty: explicit computation of `KL(policy || reference)` per sequence
-- Advantage estimation: simple `reward - value_baseline` (no GAE to keep it tractable)
-- Training: 100 PPO steps, batch_size=4, seq_len=8
-- This is the most complex script in the collection — budget accordingly
+- KL 페널티: 시퀀스별 `KL(policy || reference)` 명시적 계산
+- 이점 추정: 단순 `reward - value_baseline` (처리 가능하도록 GAE 없음)
+- 학습: 100 PPO 스텝, batch_size=4, seq_len=8
+- 컬렉션에서 가장 복잡한 스크립트 — 그에 맞게 시간 배정할 것
 
 ```python
 # IMPLEMENTATION NOTE: The reward model and value function use plain floats (not
@@ -547,54 +547,54 @@ This prevents readers from skipping the autograd section and missing per-script 
 # preserving the complete PPO algorithm.
 ```
 
-**Success criteria:**
+**성공 기준:**
 
-- Reward model accuracy: > 70% on held-out preference pairs
-- Policy generation shifts toward preferred completions over training
-- PPO loss decreases; KL divergence increases (controlled by penalty coefficient)
-- Runtime: < 7 minutes on M-series Mac
+- 보상 모델 정확도: 홀드아웃 선호도 쌍에서 > 70%
+- 정책 생성이 학습에 걸쳐 선호 완성 쪽으로 이동
+- PPO loss가 감소; KL divergence가 증가 (페널티 계수로 제어)
+- 런타임: M-series Mac에서 < 7분
 
-**Expected complexity:** ~550-600 lines. The most ambitious script; three interacting models plus the RL loop.
+**예상 복잡도:** ~550-600줄. 가장 야심찬 스크립트; 세 개의 상호작용하는 모델 + RL 루프.
 
 ---
 
 ### `micromoe.py` — Mixture of Experts
 
-> _"How to scale model capacity without scaling compute — sparse routing in action."_
+> _"연산을 스케일링하지 않고 모델 용량을 스케일링하는 방법 — sparse routing 실전."_
 
-**What it teaches:**
+**가르치는 것:**
 
-- The MoE concept: multiple expert networks, only some activated per input
-- Router/gating network: how tokens get assigned to experts
-- Top-k expert selection and soft combining of expert outputs
-- Load balancing loss: why naive routing collapses to using one expert
-- The capacity vs. compute tradeoff that makes MoE compelling at scale
+- MoE 개념: 다수의 expert 네트워크, 입력당 일부만 활성화
+- Router/gating 네트워크: 토큰이 expert에 할당되는 방법
+- Top-k expert 선택과 expert 출력의 소프트 결합
+- Load balancing loss: 순진한 라우팅이 왜 하나의 expert만 사용하게 붕괴하는지
+- MoE가 스케일에서 매력적인 용량 vs. 연산 트레이드오프
 
-**Algorithm outline:**
+**알고리즘 개요:**
 
 ```
-1. Define N small expert MLPs (each identical architecture, different weights)
-2. Define a router: linear layer mapping input → N expert scores
-3. For each input token:
-   a. Router produces scores over N experts
-   b. Select top-k experts (k=2 typically)
-   c. Compute weighted sum of selected expert outputs
-4. Add load balancing auxiliary loss to prevent expert collapse
-5. Train on language modeling objective + auxiliary loss
-6. Show: expert utilization statistics and per-expert specialization
+1. N개의 작은 expert MLP 정의 (각각 동일 아키텍처, 다른 가중치)
+2. Router 정의: 입력을 N개 expert 점수로 매핑하는 linear layer
+3. 각 입력 토큰에 대해:
+   a. Router가 N개 expert에 대한 점수를 생성
+   b. Top-k expert 선택 (보통 k=2)
+   c. 선택된 expert 출력의 가중 합 계산
+4. Expert 붕괴를 방지하기 위한 load balancing 보조 loss 추가
+5. 언어 모델링 목적 + 보조 loss로 학습
+6. 보여줌: expert 활용 통계와 expert별 특화
 ```
 
-**Dataset:** `names.txt` or a slightly larger text corpus to give experts enough signal to specialize.
+**데이터셋:** `names.txt` 또는 expert에게 특화할 충분한 신호를 주기 위한 약간 더 큰 텍스트 코퍼스.
 
-**Key implementation details:**
+**핵심 구현 사항:**
 
-- **Hybrid autograd approach:** The router uses scalar autograd (`Value` class) because routing decisions are the core MoE mechanism — gradients must flow through the gating function. Expert MLPs use plain float arrays with manual gradient computation for runtime tractability.
-- 4 experts, top-2 routing (preserves meaningful load balancing dynamics)
-- Router is a simple linear layer with softmax (autograd `Value` objects)
-- Experts are 2-layer MLPs with ~200 params each (plain floats)
-- Load balancing loss: minimize variance of expert assignment frequencies
-- Track and print expert utilization per training step
-- Demonstrate expert specialization: which experts activate for which input patterns
+- **Hybrid autograd 접근:** Router는 scalar autograd (`Value` class)를 사용. 라우팅 결정이 MoE의 핵심 메커니즘이므로 기울기가 gating function을 통해 흘러야 함. Expert MLP는 런타임 처리 가능성을 위해 수동 기울기 계산이 포함된 일반 float 배열 사용.
+- 4개 expert, top-2 라우팅 (의미 있는 load balancing 역학 보존)
+- Router는 softmax를 사용한 간단한 linear layer (autograd `Value` 객체)
+- Expert는 각 ~200 params의 2층 MLP (일반 float)
+- Load balancing loss: expert 할당 빈도의 분산 최소화
+- 학습 스텝마다 expert 활용도를 추적하고 출력
+- Expert 특화를 시연: 어떤 expert가 어떤 입력 패턴에 활성화되는지
 
 ```python
 # IMPLEMENTATION NOTE: Experts use plain floats (not autograd Value objects) for
@@ -604,276 +604,276 @@ This prevents readers from skipping the autograd section and missing per-script 
 # we split the approach to stay within pure-Python runtime constraints.
 ```
 
-**Success criteria:**
+**성공 기준:**
 
-- All 4 experts receive >10% of token assignments (no expert collapse)
-- Load balancing loss decreases over training
-- Different experts show measurable specialization on different input patterns
-- Runtime: < 7 minutes on M-series Mac
+- 4개 expert 모두 토큰 할당의 >10%를 받음 (expert 붕괴 없음)
+- 학습에 걸쳐 load balancing loss가 감소
+- 다른 expert가 다른 입력 패턴에서 측정 가능한 특화를 보임
+- 런타임: M-series Mac에서 < 7분
 
-**Expected complexity:** ~350-400 lines. The routing logic and auxiliary loss are the core; each expert is a simple MLP.
+**예상 복잡도:** ~350-400줄. 라우팅 로직과 보조 loss가 핵심; 각 expert는 단순한 MLP.
 
 ---
 
-## 03 — Systems & Inference
+## 03 — 시스템 & 추론
 
-### `microattention.py` — Attention Variants Compendium
+### `microattention.py` — Attention 변형 모음
 
-> _"Every attention mechanism that matters, implemented side by side in one file."_
+> _"중요한 모든 attention 메커니즘, 하나의 파일에서 나란히 구현."_
 
-**What it teaches:**
+**가르치는 것:**
 
 - Vanilla scaled dot-product attention
-- Multi-head attention (parallel heads, concatenate, project)
-- Grouped-query attention (GQA): shared KV heads across query heads
-- Multi-query attention (MQA): single KV head for all query heads
-- Sliding window attention: local context window
-- How each variant trades off memory, compute, and quality
+- Multi-head attention (병렬 head, 연결, 프로젝션)
+- Grouped-query attention (GQA): query head 간 공유 KV head
+- Multi-query attention (MQA): 모든 query head에 대해 단일 KV head
+- Sliding window attention: 로컬 컨텍스트 윈도우
+- 각 변형이 메모리, 연산, 품질을 어떻게 트레이드오프하는지
 
-**Algorithm outline:**
+**알고리즘 개요:**
 
 ```
-For each attention variant:
-1. Implement the forward pass
-2. Count FLOPs and memory usage analytically
-3. Run on the same input sequence
-4. Print: output values, FLOP count, memory footprint
-5. Compare all variants in a summary table
+각 attention 변형에 대해:
+1. 순전파 구현
+2. FLOP 및 메모리 사용량을 분석적으로 계산
+3. 같은 입력 시퀀스에서 실행
+4. 출력: 출력 값, FLOP 수, 메모리 풋프린트
+5. 모든 변형을 요약 테이블로 비교
 ```
 
-**Dataset:** No training. Uses random input tensors (lists of lists of `Value` or plain floats) to demonstrate the mechanics.
+**데이터셋:** 학습 없음. 메커니즘을 시연하기 위해 랜덤 입력 텐서 (`Value` 또는 일반 float의 리스트 of 리스트) 사용.
 
-**Key implementation details:**
+**핵심 구현 사항:**
 
-- This is primarily a **forward-pass comparison**, not a training script (exception to the train+infer rule, justified because the focus is architectural comparison)
-- Each variant is a self-contained function
-- Print a comparison table at the end: variant, FLOPs, memory, output similarity
-- GQA and MQA are implemented as modifications of the MHA base, making the differences explicit
+- 이것은 주로 **순전파 비교**이지, 학습 스크립트가 아님 (초점이 아키텍처 비교에 있으므로, 학습+추론 규칙의 예외로 정당화됨)
+- 각 변형은 자기 완결적 함수
+- 마지막에 비교 테이블 출력: 변형, FLOP, 메모리, 출력 유사도
+- GQA와 MQA는 MHA 기본의 수정으로 구현, 차이를 명시적으로 만듦
 
-**Success criteria:**
+**성공 기준:**
 
-- All variants produce valid attention outputs (no NaN, no overflow)
-- MQA and GQA outputs are close to MHA (cosine similarity > 0.95)
-- Printed comparison table shows correct FLOP/memory tradeoffs
-- Runtime: < 1 minute on M-series Mac
+- 모든 변형이 유효한 attention 출력을 생성 (NaN 없음, 오버플로우 없음)
+- MQA와 GQA 출력이 MHA에 근접 (cosine similarity > 0.95)
+- 출력된 비교 테이블이 올바른 FLOP/메모리 트레이드오프를 보여줌
+- 런타임: M-series Mac에서 < 1분
 
-**Expected complexity:** ~250-300 lines. Multiple small implementations rather than one large one.
+**예상 복잡도:** ~250-300줄. 하나의 큰 구현이 아닌 여러 작은 구현.
 
 ---
 
-### `microkv.py` — KV-Cache Mechanics
+### `microkv.py` — KV-Cache 메커니즘
 
-> _"Why LLM inference is memory-bound — and exactly how the KV cache works."_
+> _"LLM 추론이 왜 메모리 바운드인지 — 그리고 KV cache가 정확히 어떻게 작동하는지."_
 
-**What it teaches:**
+**가르치는 것:**
 
-- Why naively running attention at each generation step is O(n²) redundant
-- The KV cache: store and reuse key/value projections from previous positions
-- Memory growth: how cache size scales with sequence length, layers, and heads
-- Paged attention intuition: why memory fragmentation matters at scale
-- Prefill vs. decode phases
+- 각 생성 스텝에서 순진하게 attention을 실행하면 왜 O(n²)의 중복인지
+- KV cache: 이전 위치의 key/value 프로젝션을 저장하고 재사용
+- 메모리 성장: 캐시 크기가 시퀀스 길이, 레이어, head에 따라 어떻게 스케일링되는지
+- Paged attention 직관: 왜 메모리 단편화가 스케일에서 중요한지
+- Prefill vs. decode 단계
 
-**Algorithm outline:**
+**알고리즘 개요:**
 
 ```
-1. Implement attention WITHOUT KV cache (recompute everything each step)
-2. Implement attention WITH KV cache (incremental, append-only)
-3. Run both on the same autoregressive generation task
-4. Compare: computation count, memory usage at each step
-5. Simulate paged allocation: fixed-size blocks, pointer table
+1. KV cache 없이 attention 구현 (매 스텝 모든 것을 재계산)
+2. KV cache 포함 attention 구현 (점진적, append-only)
+3. 둘 다 같은 자기회귀 생성 태스크에서 실행
+4. 비교: 각 스텝의 연산 수, 메모리 사용량
+5. Paged 할당 시뮬레이션: 고정 크기 블록, 포인터 테이블
 ```
 
-**Dataset:** Uses a pretrained tiny model (train inline or hardcode small weights) for generation.
+**데이터셋:** 사전학습된 작은 모델 (인라인 학습 또는 작은 가중치 하드코딩)을 생성에 사용.
 
-**Key implementation details:**
+**핵심 구현 사항:**
 
-- Side-by-side implementations make the redundancy obvious
-- Count and print multiply operations at each generation step
-- Show memory growth curve: cache size as a function of sequence position
-- Paged attention section is conceptual/simulated — demonstrate the allocation strategy without a full memory manager
+- 나란히 놓은 구현이 중복을 명백하게 만듦
+- 각 생성 스텝에서 곱셈 연산을 세고 출력
+- 메모리 성장 곡선을 보여줌: 시퀀스 위치에 따른 캐시 크기
+- Paged attention 섹션은 개념적/시뮬레이션 — 전체 메모리 관리자 없이 할당 전략을 시연
 
-**Success criteria:**
+**성공 기준:**
 
-- With-cache and without-cache produce identical outputs
-- Operation count: without-cache grows as O(n²), with-cache grows as O(n)
-- Memory growth curve is printed and shows linear scaling
-- Runtime: < 4 minutes on M-series Mac
+- 캐시 포함과 미포함이 동일한 출력을 생성
+- 연산 수: 캐시 미포함은 O(n²)로 성장, 캐시 포함은 O(n)로 성장
+- 메모리 성장 곡선이 출력되고 선형 스케일링을 보여줌
+- 런타임: M-series Mac에서 < 4분
 
-**Expected complexity:** ~200-250 lines. The comparison structure is the teaching tool.
+**예상 복잡도:** ~200-250줄. 비교 구조가 교육 도구.
 
 ---
 
-### `microquant.py` — Weight Quantization
+### `microquant.py` — 가중치 양자화
 
-> _"How to shrink a model by 4x with minimal quality loss — the math behind INT8 and INT4."_
+> _"최소한의 품질 손실로 모델을 4배 축소하는 방법 — INT8과 INT4 뒤의 수학."_
 
-**What it teaches:**
+**가르치는 것:**
 
-- Why quantization works: neural network weights are approximately normally distributed
-- Absmax quantization: scale to fit the integer range
-- Zero-point quantization: asymmetric ranges
-- Per-channel vs. per-tensor quantization granularity
-- Dequantization for inference
-- Quality degradation measurement
+- 양자화가 작동하는 이유: 신경망 가중치는 대략적으로 정규분포
+- Absmax 양자화: 정수 범위에 맞게 스케일링
+- Zero-point 양자화: 비대칭 범위
+- Per-channel vs. per-tensor 양자화 세분성
+- 추론을 위한 역양자화
+- 품질 저하 측정
 
-**Algorithm outline:**
+**알고리즘 개요:**
 
 ```
-1. Train a small model to convergence (reuse microgpt architecture)
-2. Quantize weights to INT8:
-   a. Compute scale factor: max(abs(weights)) / 127
-   b. Quantize: round(weight / scale)
-   c. Store as integers + scale factor
-3. Quantize weights to INT4 (same process, range [-8, 7])
-4. Dequantize and run inference with each version
-5. Compare: model size, generation quality, per-token loss
+1. 작은 모델을 수렴까지 학습 (microgpt 아키텍처 재사용)
+2. 가중치를 INT8로 양자화:
+   a. 스케일 팩터 계산: max(abs(weights)) / 127
+   b. 양자화: round(weight / scale)
+   c. 정수 + 스케일 팩터로 저장
+3. 가중치를 INT4로 양자화 (같은 과정, 범위 [-8, 7])
+4. 역양자화하고 각 버전으로 추론 실행
+5. 비교: 모델 크기, 생성 품질, 토큰별 loss
 ```
 
-**Dataset:** `names.txt` — train the base model, then quantize and compare.
+**데이터셋:** `names.txt` — 기본 모델을 학습한 다음, 양자화하고 비교.
 
-**Key implementation details:**
+**핵심 구현 사항:**
 
-- Represent quantized weights as Python integers, not floats — this is the point
-- Show the actual memory savings: `float32 (4 bytes) → int8 (1 byte) → int4 (0.5 bytes)`
-- Compute and print perplexity/loss for each quantization level
-- Demonstrate per-channel vs. per-tensor: quantize each row of a weight matrix separately vs. the whole matrix
-- Round-trip test: quantize → dequantize → compare to original
+- 양자화된 가중치를 float가 아닌 Python 정수로 표현 — 이것이 핵심
+- 실제 메모리 절약을 보여줌: `float32 (4 bytes) → int8 (1 byte) → int4 (0.5 bytes)`
+- 각 양자화 수준별 perplexity/loss를 계산하고 출력
+- Per-channel vs. per-tensor 시연: 가중치 행렬의 각 행을 별도로 양자화 vs. 전체 행렬
+- 왕복 테스트: 양자화 → 역양자화 → 원본과 비교
 
-**Success criteria:**
+**성공 기준:**
 
-- INT8 quantized model loss within 10% of float32 baseline
-- INT4 quantized model loss within 25% of float32 baseline
-- Per-channel quantization outperforms per-tensor quantization
-- Printed table shows model size reduction: float32 → INT8 (4x) → INT4 (8x)
-- Runtime: < 6 minutes on M-series Mac
+- INT8 양자화 모델 loss가 float32 기준의 10% 이내
+- INT4 양자화 모델 loss가 float32 기준의 25% 이내
+- Per-channel 양자화가 per-tensor 양자화보다 우수
+- 출력 테이블이 모델 크기 감소를 보여줌: float32 → INT8 (4x) → INT4 (8x)
+- 런타임: M-series Mac에서 < 6분
 
-**Expected complexity:** ~300-350 lines. Includes base training + quantization + comparative evaluation.
+**예상 복잡도:** ~300-350줄. 기본 학습 + 양자화 + 비교 평가를 포함.
 
 ---
 
-### `microflash.py` — Flash Attention (Algorithmic Simulation)
+### `microflash.py` — Flash Attention (알고리즘 시뮬레이션)
 
-> _"Why Flash Attention is fast — the tiling and online softmax trick, simulated in pure Python."_
+> _"Flash Attention이 빠른 이유 — tiling과 online softmax 트릭, 순수 Python으로 시뮬레이션."_
 
-**What it teaches:**
+**가르치는 것:**
 
-- Standard attention's memory bottleneck: materializing the full N×N attention matrix
-- Tiled computation: process attention in blocks that fit in "fast memory"
-- Online softmax: compute softmax incrementally without storing all scores
-- The IO complexity argument: why fewer memory reads matter more than fewer FLOPs
-- Memory access patterns: the real reason Flash Attention is faster
+- 표준 attention의 메모리 병목: 전체 N×N attention 행렬의 구체화
+- Tiled 연산: "빠른 메모리"에 맞는 블록 단위로 attention 처리
+- Online softmax: 모든 점수를 저장하지 않고 softmax를 점진적으로 계산
+- IO 복잡도 논증: 더 적은 메모리 읽기가 더 적은 FLOP보다 왜 더 중요한지
+- 메모리 접근 패턴: Flash Attention이 더 빠른 진짜 이유
 
-**Algorithm outline:**
+**알고리즘 개요:**
 
 ```
-1. Implement standard attention (materialize full N×N matrix)
-2. Implement Flash Attention:
-   a. Tile Q, K, V into blocks of size B
-   b. For each Q block:
-      - For each K,V block:
-        - Compute partial attention scores
-        - Update running softmax using online algorithm
-        - Accumulate weighted values
-   c. Rescale final output
-3. Verify: outputs match standard attention (within floating point tolerance)
-4. Compare: peak "memory" usage (simulated), number of memory reads/writes
+1. 표준 attention 구현 (전체 N×N 행렬 구체화)
+2. Flash Attention 구현:
+   a. Q, K, V를 크기 B 블록으로 타일링
+   b. 각 Q 블록에 대해:
+      - 각 K,V 블록에 대해:
+        - 부분 attention 점수 계산
+        - Online 알고리즘으로 running softmax 업데이트
+        - 가중 값 누적
+   c. 최종 출력 리스케일
+3. 검증: 출력이 표준 attention과 일치 (부동소수점 허용 오차 내)
+4. 비교: 최대 "메모리" 사용량 (시뮬레이션), 메모리 읽기/쓰기 횟수
 ```
 
-**Dataset:** No training. Random matrices of configurable size to demonstrate the mechanics.
+**데이터셋:** 학습 없음. 메커니즘을 시연하기 위한 설정 가능한 크기의 랜덤 행렬.
 
-**Key implementation details:**
+**핵심 구현 사항:**
 
-- **This is an algorithmic simulation, not a performance optimization.** Pure Python will be slower than standard attention. The point is to show _what_ Flash Attention does, not to be fast.
-- Online softmax is the key insight: maintain running `max` and `sum` across blocks
-- Track and print simulated memory usage: standard (O(N²)) vs. flash (O(N))
-- Configurable block size B to show how tiling granularity affects memory
-- Numerical verification: assert outputs match within 1e-6
+- **이것은 알고리즘 시뮬레이션이지, 성능 최적화가 아님.** 순수 Python은 표준 attention보다 느릴 것임. 요점은 Flash Attention이 _무엇을_ 하는지 보여주는 것이지, 빠른 것이 아님.
+- Online softmax가 핵심 통찰: 블록 간 running `max`와 `sum`을 유지
+- 시뮬레이션된 메모리 사용량을 추적하고 출력: 표준 (O(N²)) vs. flash (O(N))
+- 설정 가능한 블록 크기 B로 tiling 세분성이 메모리에 미치는 영향을 보여줌
+- 수치 검증: 출력이 1e-6 이내로 일치하는지 assert
 
-**Success criteria:**
+**성공 기준:**
 
-- Flash attention output matches standard attention within 1e-6 tolerance
-- Simulated peak memory: standard O(N²) vs. flash O(N) clearly shown
-- Runtime: < 2 minutes on M-series Mac
+- Flash attention 출력이 1e-6 허용 오차 내에서 표준 attention과 일치
+- 시뮬레이션된 최대 메모리: 표준 O(N²) vs. flash O(N)이 명확히 보여짐
+- 런타임: M-series Mac에서 < 2분
 
-**Expected complexity:** ~300-350 lines. The online softmax is the crux; tiling bookkeeping and comparison output add more lines than expected.
+**예상 복잡도:** ~300-350줄. Online softmax가 핵심; tiling 부기와 비교 출력이 예상보다 더 많은 줄을 추가.
 
 ---
 
-### `microbeam.py` — Decoding Strategies
+### `microbeam.py` — 디코딩 전략
 
-> _"Beyond greedy: beam search, top-k, top-p, and speculative decoding in one file."_
+> _"탐욕을 넘어서: beam search, top-k, top-p, speculative decoding을 하나의 파일에."_
 
-**What it teaches:**
+**가르치는 것:**
 
-- Greedy decoding: take the argmax at each step (and why it's suboptimal)
-- Temperature sampling: controlling randomness
-- Top-k sampling: truncate to k most likely tokens
-- Top-p (nucleus) sampling: truncate to cumulative probability threshold
-- Beam search: maintain top-B candidates, score complete sequences
-- Speculative decoding: use a small model to draft, large model to verify
+- Greedy decoding: 각 스텝에서 argmax를 취하기 (그리고 왜 차선인지)
+- Temperature sampling: 무작위성 제어
+- Top-k sampling: 가장 가능성 높은 k개 토큰으로 절단
+- Top-p (nucleus) sampling: 누적 확률 임계값으로 절단
+- Beam search: 상위 B개 후보를 유지하고 완성 시퀀스를 스코어링
+- Speculative decoding: 작은 모델로 초안을 작성하고 큰 모델로 검증
 
-**Algorithm outline:**
+**알고리즘 개요:**
 
 ```
-1. Train two language models inline (reuses microgpt's autograd pattern):
-   - Large "target" model: n_embd=16, n_layer=1 (~4,200 params)
-   - Small "draft" model: n_embd=8, n_layer=1 (~1,300 params)
-2. Implement each decoding strategy as a separate function
-3. Generate from the same prompt with each strategy
-4. Print: generated text, total log-probability, generation speed (simulated)
+1. 인라인으로 두 언어 모델 학습 (microgpt의 autograd 패턴 재사용):
+   - 큰 "target" 모델: n_embd=16, n_layer=1 (~4,200 params)
+   - 작은 "draft" 모델: n_embd=8, n_layer=1 (~1,300 params)
+2. 각 디코딩 전략을 별도 함수로 구현
+3. 각 전략으로 같은 프롬프트에서 생성
+4. 출력: 생성된 텍스트, 총 log-probability, 생성 속도 (시뮬레이션)
 5. Speculative decoding:
-   a. Small "draft" model generates k tokens greedily
-   b. Large "target" model scores all k tokens in parallel
-   c. Accept matching tokens, reject and resample from the first mismatch
+   a. 작은 "draft" 모델이 k개 토큰을 탐욕적으로 생성
+   b. 큰 "target" 모델이 k개 토큰을 모두 병렬로 스코어링
+   c. 일치하는 토큰 수락, 첫 불일치에서 거부하고 재샘플링
 ```
 
-**Dataset:** `names.txt` — generate names using different strategies from the same trained model.
+**데이터셋:** `names.txt` — 같은 학습된 모델에서 다른 전략으로 이름을 생성.
 
-**Key implementation details:**
+**핵심 구현 사항:**
 
-- All strategies operate on the same underlying model, making comparison fair
-- Beam search requires maintaining B independent KV caches (or re-computing)
-- Speculative decoding uses two model sizes (different `n_embd` / `n_layer` configs)
-- Print a comparison table: strategy, output, log-prob, tokens/step
+- 모든 전략이 같은 기반 모델에서 동작하여, 비교가 공정
+- Beam search는 B개의 독립적 KV cache 유지 (또는 재계산) 필요
+- Speculative decoding은 두 모델 크기 사용 (다른 `n_embd` / `n_layer` 설정)
+- 비교 테이블 출력: 전략, 출력, log-prob, tokens/step
 
-**Success criteria:**
+**성공 기준:**
 
-- All decoding strategies produce valid token sequences
-- Beam search produces higher log-probability sequences than greedy
-- Top-p and top-k produce more diverse outputs than greedy (measured by unique name count)
-- Speculative decoding accepts ≥50% of draft tokens on average
-- Printed comparison table: strategy, output, log-prob, tokens/step
-- Runtime: < 7 minutes on M-series Mac
+- 모든 디코딩 전략이 유효한 토큰 시퀀스를 생성
+- Beam search가 greedy보다 높은 log-probability 시퀀스를 생성
+- Top-p와 top-k가 greedy보다 더 다양한 출력을 생성 (고유 이름 수로 측정)
+- Speculative decoding이 평균적으로 draft 토큰의 50% 이상 수락
+- 출력 비교 테이블: 전략, 출력, log-prob, tokens/step
+- 런타임: M-series Mac에서 < 7분
 
-**Expected complexity:** ~450-500 lines. Many small implementations + the speculative decoding two-model setup + inline training.
+**예상 복잡도:** ~450-500줄. 많은 작은 구현 + speculative decoding 두 모델 설정 + 인라인 학습.
 
 ---
 
-## Implementation Priority & Sequencing
+## 구현 우선순위 & 순서
 
-Scripts were built in this order to manage dependencies and validate the shared autograd/model patterns. The canonical autograd interface (`docs/autograd-interface.md`) was finalized before Phase 2.
+스크립트는 의존성을 관리하고 공유 autograd/모델 패턴을 검증하기 위해 이 순서로 구축됨. 표준 autograd 인터페이스(`docs/autograd-interface.md`)는 Phase 2 전에 확정됨.
 
-| Phase       | Scripts                                           | Rationale                                                                                                                                                                                  |
+| 단계        | 스크립트                                          | 근거                                                                                                                                                                                       |
 | ----------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Phase 1** | `microtokenizer.py`, `microembedding.py`          | No autograd dependency, standalone algorithms                                                                                                                                              |
-| **Phase 2** | `microgpt.py`, `micrornn.py`, `microattention.py` | Establishes the canonical autograd `Value` class pattern. microgpt is the reference implementation; micrornn extends it with `sigmoid`. microattention is forward-pass only (no autograd). |
-| **Phase 3** | `microrag.py`, `microlora.py`                     | microrag uses a character-level MLP (lighter autograd dependency). microlora builds directly on microgpt's training pattern.                                                               |
-| **Phase 4** | `microdiffusion.py`, `microvae.py`                | Independent algorithms, different model families. Can be parallelized with Phase 3.                                                                                                        |
-| **Phase 5** | `microdpo.py`, `microppo.py`                      | Requires stable autograd pattern from Phase 2. microppo uses hybrid autograd (policy: Value class, reward/value: plain floats).                                                            |
-| **Phase 6** | `microquant.py`, `microkv.py`, `microflash.py`    | Systems scripts, can be built independently of Phases 3-5                                                                                                                                  |
-| **Phase 7** | `microbeam.py`, `micromoe.py`                     | microbeam trains two models inline (depends on Phase 2 patterns). micromoe uses hybrid autograd (router: Value class, experts: plain floats).                                              |
+| **Phase 1** | `microtokenizer.py`, `microembedding.py`          | Autograd 의존성 없음, 독립형 알고리즘                                                                                                                                                      |
+| **Phase 2** | `microgpt.py`, `micrornn.py`, `microattention.py` | 표준 autograd `Value` class 패턴 확립. microgpt가 참조 구현; micrornn이 `sigmoid`으로 확장. microattention은 순전파만 (autograd 없음).                                                      |
+| **Phase 3** | `microrag.py`, `microlora.py`                     | microrag는 문자 수준 MLP 사용 (더 가벼운 autograd 의존성). microlora는 microgpt의 학습 패턴에 직접 기반.                                                                                   |
+| **Phase 4** | `microdiffusion.py`, `microvae.py`                | 독립적 알고리즘, 다른 모델 계열. Phase 3과 병렬화 가능.                                                                                                                                    |
+| **Phase 5** | `microdpo.py`, `microppo.py`                      | Phase 2의 안정적 autograd 패턴 필요. microppo는 hybrid autograd 사용 (정책: Value class, 보상/value: 일반 float).                                                                          |
+| **Phase 6** | `microquant.py`, `microkv.py`, `microflash.py`    | 시스템 스크립트, Phase 3-5와 독립적으로 구축 가능                                                                                                                                          |
+| **Phase 7** | `microbeam.py`, `micromoe.py`                     | microbeam은 인라인으로 두 모델 학습 (Phase 2 패턴 의존). micromoe는 hybrid autograd 사용 (router: Value class, expert: 일반 float).                                                        |
 
-### Dependency Notes
+### 의존성 참고사항
 
-- **Phase 2 is the critical path.** It establishes the autograd `Value` class that 6 subsequent scripts reimplement. The canonical interface must be validated here.
-- **Phases 3 and 4 can run in parallel** — they have no cross-dependencies.
-- **Phase 5 scripts** (DPO, PPO) depend on the autograd pattern being stable from Phase 2. They reimplement the base model training loop internally.
-- **Hybrid autograd scripts** (microppo, micromoe) use a mix of `Value` objects and plain floats. The canonical interface still applies to the autograd portions.
+- **Phase 2가 크리티컬 패스.** 이후 6개 스크립트가 재구현하는 autograd `Value` class를 확립함. 표준 인터페이스가 여기서 검증되어야 함.
+- **Phase 3과 4는 병렬 실행 가능** — 교차 의존성 없음.
+- **Phase 5 스크립트** (DPO, PPO)는 Phase 2에서 autograd 패턴이 안정적이어야 함. 기본 모델 학습 루프를 내부적으로 재구현.
+- **Hybrid autograd 스크립트** (microppo, micromoe)는 `Value` 객체와 일반 float를 혼합 사용. 표준 인터페이스는 autograd 부분에 여전히 적용됨.
 
-## Quality Checklist
+## 품질 체크리스트
 
-See `CONTRIBUTING.md` for the complete quality checklist (execution, commenting, readability, logistics). That document is the single authoritative reference for PR review criteria.
+전체 품질 체크리스트(실행, 주석, 가독성, 물류)는 `CONTRIBUTING.md`를 참조할 것. 해당 문서가 PR 리뷰 기준의 유일한 권위 있는 참조임.
 
 ---
 
-_Each script is a proof. The algorithm is simpler than you think._
+_각 스크립트는 하나의 증명임. 알고리즘은 생각보다 단순함._

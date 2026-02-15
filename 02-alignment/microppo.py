@@ -1,6 +1,6 @@
 """
-The full RLHF loop: pretrain a language model, train a reward model on human preferences,
-then optimize the policy with Proximal Policy Optimization -- all in one file, from scratch.
+전체 RLHF 루프: language model을 pretrain하고, human preference로 reward model을 학습한 뒤,
+Proximal Policy Optimization으로 policy를 최적화함 -- 전부 하나의 파일에서, 처음부터 구현함.
 """
 # Reference: Schulman et al., "Proximal Policy Optimization Algorithms" (2017).
 # https://arxiv.org/abs/1707.06347
@@ -22,55 +22,55 @@ random.seed(42)
 
 # === CONSTANTS AND HYPERPARAMETERS ===
 
-# Policy model architecture -- smaller than microgpt to fit the three-model pipeline
-# within the 7-minute runtime budget. The architecture is identical (attention, MLP,
-# residual connections); only the dimensions are reduced.
-N_EMBD = 8          # embedding dimension (vs. 16 in microgpt)
-N_HEAD = 2          # attention heads (vs. 4)
-N_LAYER = 1         # transformer blocks
-BLOCK_SIZE = 12     # context window (vs. 16) -- shorter because names are typically 3-8 chars
-HEAD_DIM = N_EMBD // N_HEAD  # 4 dimensions per head
+# Policy model 아키텍처 -- 3개 모델 파이프라인을 7분 런타임 제한 내에 맞추기 위해
+# microgpt보다 작게 설정함. 아키텍처 자체는 동일하고(attention, MLP,
+# residual connection), 차원만 줄임.
+N_EMBD = 8          # embedding 차원 (microgpt의 16 대비)
+N_HEAD = 2          # attention head 수 (4 대비)
+N_LAYER = 1         # transformer 블록 수
+BLOCK_SIZE = 12     # context window (16 대비) -- 이름이 보통 3-8자이므로 짧게 설정함
+HEAD_DIM = N_EMBD // N_HEAD  # head당 4차원
 
-# Pretraining parameters
+# Pretraining 파라미터
 PRETRAIN_LR = 0.01
 PRETRAIN_STEPS = 500
 BETA1 = 0.85
 BETA2 = 0.99
 EPS_ADAM = 1e-8
 
-# Reward model parameters
-REWARD_HIDDEN = 32       # hidden layer width
-REWARD_LR = 0.01         # SGD learning rate
-REWARD_STEPS = 400        # training iterations
-REWARD_MARGIN = 1.0       # ranking loss margin -- forces clear separation between preferred/rejected
+# Reward model 파라미터
+REWARD_HIDDEN = 32       # hidden layer 너비
+REWARD_LR = 0.01         # SGD 학습률
+REWARD_STEPS = 400        # 학습 반복 횟수
+REWARD_MARGIN = 1.0       # ranking loss margin -- preferred/rejected 간 명확한 분리를 강제함
 
-# PPO parameters
-PPO_CLIP_EPS = 0.2       # clipping epsilon -- limits how far the policy ratio can deviate
-KL_COEFF = 0.5           # KL penalty coefficient -- higher than typical (0.01-0.1) because our
-                         # tiny model and synthetic reward are prone to mode collapse
-PPO_STEPS = 100          # number of PPO optimization steps (fewer to prevent over-optimization)
-BATCH_SIZE = 4           # completions generated per PPO step
-MAX_GEN_LEN = 8          # max generation length
-MIN_GEN_LEN = 2          # minimum generation length -- penalize degenerate empty outputs
-PPO_LR = 0.0005          # lower than pretraining to prevent catastrophic forgetting
-VALUE_LR = 0.01          # value function learning rate
+# PPO 파라미터
+PPO_CLIP_EPS = 0.2       # clipping epsilon -- policy ratio가 얼마나 벗어날 수 있는지 제한함
+KL_COEFF = 0.5           # KL penalty 계수 -- 일반적인 값(0.01-0.1)보다 높음. 작은 모델과
+                         # synthetic reward 환경에서 mode collapse가 잘 발생하기 때문임
+PPO_STEPS = 100          # PPO 최적화 스텝 수 (과최적화 방지를 위해 적게 설정함)
+BATCH_SIZE = 4           # PPO 스텝당 생성하는 completion 수
+MAX_GEN_LEN = 8          # 최대 생성 길이
+MIN_GEN_LEN = 2          # 최소 생성 길이 -- 퇴화된 빈 출력에 페널티를 줌
+PPO_LR = 0.0005          # pretraining보다 낮게 설정하여 catastrophic forgetting 방지함
+VALUE_LR = 0.01          # value function 학습률
 
-# Data parameters
+# Data 파라미터
 DATA_URL = "https://raw.githubusercontent.com/karpathy/makemore/master/names.txt"
 DATA_FILE = "names.txt"
 
-# IMPLEMENTATION NOTE: The reward model and value function use plain floats (not
-# autograd Value objects) for runtime tractability. The policy model uses scalar
-# autograd because PPO gradients must flow through the policy's generation process.
-# Production RLHF (InstructGPT, ChatGPT) vectorizes all three models on GPUs;
-# we split the approach to stay within pure-Python runtime constraints while
-# preserving the complete PPO algorithm.
+# 구현 참고: reward model과 value function은 런타임 효율을 위해 일반 float를 사용함
+# (autograd Value 객체가 아님). policy model은 PPO gradient가 policy의 생성 과정을
+# 통해 흘러야 하므로 scalar autograd를 사용함.
+# 프로덕션 RLHF(InstructGPT, ChatGPT)는 세 모델 모두 GPU에서 벡터화함.
+# 순수 Python 런타임 제약 내에서 완전한 PPO 알고리즘을 보존하기 위해
+# 이렇게 접근 방식을 분리함.
 
 
 # === DATA LOADING ===
 
 def load_data(url: str, filename: str) -> list[str]:
-    """Download and parse the training corpus."""
+    """학습 코퍼스를 다운로드하고 파싱함."""
     if not os.path.exists(filename):
         print(f"Downloading {filename}...")
         urllib.request.urlretrieve(url, filename)
@@ -84,11 +84,11 @@ def load_data(url: str, filename: str) -> list[str]:
 # === SCALAR AUTOGRAD ENGINE ===
 
 class Value:
-    """A scalar value with reverse-mode automatic differentiation.
+    """reverse-mode 자동 미분을 지원하는 scalar 값.
 
-    Every forward operation records its local derivative (dout/dinput). backward()
-    replays the computation graph in reverse topological order, accumulating gradients
-    via the chain rule: dLoss/dx = sum over paths (product of local gradients along path).
+    모든 forward 연산은 local derivative(dout/dinput)를 기록함. backward()는
+    역 위상 정렬 순서로 computation graph를 재생하며, chain rule을 통해 gradient를
+    누적함: dLoss/dx = 경로들의 합(경로를 따른 local gradient들의 곱).
     """
     __slots__ = ('data', 'grad', '_children', '_local_grads')
 
@@ -132,17 +132,17 @@ class Value:
         return Value(max(0, self.data), (self,), (float(self.data > 0),))
 
     def clip(self, low: float, high: float) -> Value:
-        """Clip value to [low, high] range. Gradient passes through when in range, zero
-        when clipped. Required for PPO ratio clipping: the clipped surrogate objective
-        prevents catastrophically large policy updates by clamping the probability ratio.
-        When the ratio is within [1-eps, 1+eps], gradients flow normally. When clipped,
-        the gradient is zeroed -- this is the "proximal" constraint in PPO."""
+        """값을 [low, high] 범위로 clamp함. 범위 내에 있으면 gradient가 통과하고,
+        clamp되면 0임. PPO ratio clipping에 필수: clipped surrogate objective가
+        확률 ratio를 clamp하여 치명적으로 큰 policy 업데이트를 방지함.
+        ratio가 [1-eps, 1+eps] 범위 내이면 gradient가 정상적으로 흐름.
+        clamp되면 gradient가 0이 됨 -- 이것이 PPO의 "proximal" 제약임."""
         clamped = max(low, min(high, self.data))
         grad = 1.0 if low < self.data < high else 0.0
         return Value(clamped, (self,), (grad,))
 
     def backward(self) -> None:
-        """Reverse-mode autodiff via topological sort of the computation graph."""
+        """computation graph의 위상 정렬을 통한 reverse-mode autodiff."""
         topo: list[Value] = []
         visited: set[int] = set()
 
@@ -161,22 +161,22 @@ class Value:
 
 
 # --- AUTOGRAD DIFFERENCES IN THIS SCRIPT ---
-# This Value class follows the canonical interface (see docs/autograd-interface.md)
-# with the following addition:
-# - clip(): Required for PPO ratio clipping (clamps value, passes gradient when in range)
+# 이 Value 클래스는 표준 인터페이스(docs/autograd-interface.md 참조)를 따르며
+# 다음이 추가됨:
+# - clip(): PPO ratio clipping에 필요함 (값을 clamp하고, 범위 내에서 gradient를 통과시킴)
 # See docs/autograd-interface.md for the full canonical interface.
 
 
 # === PARAMETER INITIALIZATION (POLICY MODEL -- VALUE CLASS) ===
 
 def make_matrix(nrows: int, ncols: int, std: float = 0.08) -> list[list[Value]]:
-    """Initialize weight matrix ~ N(0, std). Small std prevents activation explosion
-    in the tiny model where Xavier scaling (1/sqrt(d_in)) would give std=0.35."""
+    """가중치 행렬 초기화 ~ N(0, std). 작은 std로 tiny model에서 activation 폭발을
+    방지함. Xavier scaling(1/sqrt(d_in))이면 std=0.35가 되어 너무 큼."""
     return [[Value(random.gauss(0, std)) for _ in range(ncols)] for _ in range(nrows)]
 
 
 def init_policy_params(vocab_size: int) -> dict[str, list[list[Value]]]:
-    """Initialize all policy model parameters: embeddings, attention, MLP, LM head."""
+    """모든 policy model 파라미터 초기화: embedding, attention, MLP, LM head."""
     params: dict[str, list[list[Value]]] = {}
 
     params['wte'] = make_matrix(vocab_size, N_EMBD)
@@ -187,7 +187,7 @@ def init_policy_params(vocab_size: int) -> dict[str, list[list[Value]]]:
         params[f'layer{layer_idx}.attn_wk'] = make_matrix(N_EMBD, N_EMBD)
         params[f'layer{layer_idx}.attn_wv'] = make_matrix(N_EMBD, N_EMBD)
         params[f'layer{layer_idx}.attn_wo'] = make_matrix(N_EMBD, N_EMBD)
-        # MLP: expand 4x then contract (standard GPT feedforward)
+        # MLP: 4배 확장 후 축소 (표준 GPT feedforward)
         params[f'layer{layer_idx}.mlp_fc1'] = make_matrix(4 * N_EMBD, N_EMBD)
         params[f'layer{layer_idx}.mlp_fc2'] = make_matrix(N_EMBD, 4 * N_EMBD)
 
@@ -197,19 +197,19 @@ def init_policy_params(vocab_size: int) -> dict[str, list[list[Value]]]:
 
 
 def flatten_params(params: dict[str, list[list[Value]]]) -> list[Value]:
-    """Collect all Value objects from a parameter dict into a flat list."""
+    """파라미터 dict에서 모든 Value 객체를 flat 리스트로 수집함."""
     return [p for matrix in params.values() for row in matrix for p in row]
 
 
 # === CORE OPERATIONS (POLICY MODEL -- VALUE CLASS) ===
 
 def linear(x: list[Value], w: list[list[Value]]) -> list[Value]:
-    """Matrix-vector multiply: y = W @ x. Shape: [n_out, n_in] @ [n_in] -> [n_out]."""
+    """행렬-벡터 곱: y = W @ x. Shape: [n_out, n_in] @ [n_in] -> [n_out]."""
     return [sum(w_row[j] * x[j] for j in range(len(x))) for w_row in w]
 
 
 def softmax(logits: list[Value]) -> list[Value]:
-    """Stable softmax: subtract max before exp to prevent overflow.
+    """안정적인 softmax: overflow 방지를 위해 exp 전에 max를 뺌.
     softmax(x_i) = exp(x_i - max(x)) / sum_j exp(x_j - max(x))"""
     max_val = max(v.data for v in logits)
     exp_vals = [(v - max_val).exp() for v in logits]
@@ -218,15 +218,15 @@ def softmax(logits: list[Value]) -> list[Value]:
 
 
 def rmsnorm(x: list[Value]) -> list[Value]:
-    """RMS normalization: x / sqrt(mean(x^2) + eps). Simpler than LayerNorm."""
+    """RMS 정규화: x / sqrt(mean(x^2) + eps). LayerNorm보다 단순함."""
     mean_sq = sum(xi * xi for xi in x) / len(x)
     scale = (mean_sq + 1e-5) ** -0.5
     return [xi * scale for xi in x]
 
 
 def safe_log(prob: Value) -> Value:
-    """Clipped log for numerical stability. Prevents log(0) = -inf. Builds the node
-    manually with prob as its child so gradients flow through the graph."""
+    """수치 안정성을 위한 clipped log. log(0) = -inf를 방지함. prob을 child로 가지는
+    노드를 수동으로 구성하여 gradient가 graph를 통해 흐르게 함."""
     clamped = max(prob.data, 1e-10)
     return Value(math.log(clamped), (prob,), (1.0 / clamped,))
 
@@ -240,11 +240,11 @@ def policy_forward(
     values: list[list[list[Value]]],
     params: dict[str, list[list[Value]]],
 ) -> list[Value]:
-    """Single-token forward pass through the policy GPT. Returns logits over vocabulary.
+    """policy GPT의 단일 토큰 forward pass. 어휘에 대한 logit을 반환함.
 
-    Structurally identical to microgpt's forward pass but with smaller dimensions
-    (n_embd=8, n_head=2). The KV cache builds incrementally so causal masking is
-    implicit: at position t, only keys/values for positions 0..t exist.
+    microgpt의 forward pass와 구조적으로 동일하지만 차원이 더 작음
+    (n_embd=8, n_head=2). KV cache가 점진적으로 쌓이므로 causal masking이
+    암묵적임: position t에서 position 0..t의 key/value만 존재함.
     """
     tok_emb = params['wte'][token_id]
     pos_emb = params['wpe'][pos_id]
@@ -287,7 +287,7 @@ def policy_forward(
         x = [a + b for a, b in zip(x, x_residual)]
         x_residual = x
 
-        # MLP: expand, ReLU, contract
+        # MLP: 확장, ReLU, 축소
         x = rmsnorm(x)
         x = linear(x, params[f'layer{layer_idx}.mlp_fc1'])
         x = [xi.relu() for xi in x]
@@ -298,14 +298,13 @@ def policy_forward(
 
 
 # === REWARD MODEL (PLAIN FLOATS -- NO AUTOGRAD) ===
-# The reward model is a simple MLP that scores a character sequence. It uses plain
-# float arrays because it is trained independently before the PPO loop (pairwise
-# ranking loss with manual SGD), so autograd overhead is unnecessary. Production
-# reward models are large transformers; this MLP captures the same preference-learning
-# mechanism at toy scale.
+# Reward model은 문자 시퀀스를 점수화하는 단순한 MLP임. PPO 루프 이전에
+# 독립적으로 학습되므로(pairwise ranking loss와 수동 SGD) autograd 오버헤드가
+# 불필요하여 일반 float 배열을 사용함. 프로덕션 reward model은 대형 transformer이지만,
+# 이 MLP가 toy 스케일에서 동일한 preference 학습 메커니즘을 구현함.
 
 def init_reward_model(d_in: int) -> dict[str, list[list[float]]]:
-    """Initialize reward model: 2-layer MLP mapping feature vector to scalar."""
+    """reward model 초기화: feature 벡터를 scalar로 매핑하는 2-layer MLP."""
     params: dict[str, list[list[float]]] = {}
     # Hidden layer: d_in -> REWARD_HIDDEN
     params['w1'] = [[random.gauss(0, 0.1) for _ in range(d_in)] for _ in range(REWARD_HIDDEN)]
@@ -317,14 +316,14 @@ def init_reward_model(d_in: int) -> dict[str, list[list[float]]]:
 
 
 def reward_forward(features: list[float], params: dict[str, list[list[float]]]) -> float:
-    """Forward pass through the reward MLP. Returns a scalar reward score.
+    """reward MLP의 forward pass. scalar reward 점수를 반환함.
 
-    Architecture: input -> linear -> ReLU -> linear -> scalar
-    The input is a feature vector encoding character frequencies and sequence length.
-    This loses ordering information but captures the preference signal (name length,
-    character distribution) with minimal parameters.
+    아키텍처: input -> linear -> ReLU -> linear -> scalar
+    입력은 문자 빈도와 시퀀스 길이를 인코딩하는 feature 벡터임.
+    순서 정보는 손실되지만 preference 신호(이름 길이, 문자 분포)를
+    최소한의 파라미터로 포착함.
     """
-    # Hidden layer with ReLU
+    # ReLU가 있는 hidden layer
     hidden = []
     for i in range(REWARD_HIDDEN):
         h = sum(params['w1'][i][j] * features[j] for j in range(len(features))) + params['b1'][i][0]
@@ -336,22 +335,22 @@ def reward_forward(features: list[float], params: dict[str, list[list[float]]]) 
 
 
 def sequence_to_features(token_ids: list[int], vocab_size: int) -> list[float]:
-    """Convert token ID sequence to a feature vector for the reward/value models.
+    """토큰 ID 시퀀스를 reward/value model용 feature 벡터로 변환함.
 
-    Features: normalized character counts (vocab_size dims) + normalized length (1 dim).
-    The length feature is critical: our preference signal is based on name length (4-7 chars
-    preferred), so the reward model needs explicit access to this. We normalize counts by
-    a fixed constant (not sequence length) so that longer sequences have larger feature
-    magnitudes, preserving the length signal in the character features too.
+    Feature: 정규화된 문자 카운트(vocab_size 차원) + 정규화된 길이(1 차원).
+    길이 feature가 중요함: preference 신호가 이름 길이에 기반하므로(4-7자 선호)
+    reward model이 이에 대한 명시적 접근이 필요함. 시퀀스 길이가 아닌 고정 상수로
+    카운트를 정규화하여 긴 시퀀스가 더 큰 feature 크기를 갖게 하고,
+    문자 feature에서도 길이 신호를 보존함.
     """
-    features = [0.0] * (vocab_size + 1)  # +1 for length feature
+    features = [0.0] * (vocab_size + 1)  # 길이 feature를 위해 +1
     for tid in token_ids:
         if 0 <= tid < vocab_size:
             features[tid] += 1.0
-    # Scale character counts to roughly [0, 1] per-character range
+    # 문자 카운트를 대략 [0, 1] 범위로 스케일링
     for i in range(vocab_size):
         features[i] /= 10.0
-    # Length feature: normalized to [0, 1] (max practical name ~10 chars)
+    # 길이 feature: [0, 1]로 정규화 (실용적 최대 이름 길이 ~10자)
     features[vocab_size] = len(token_ids) / 10.0
     return features
 
@@ -362,19 +361,19 @@ def reward_backward(
     params: dict[str, list[list[float]]],
     lr: float,
 ) -> float:
-    """One step of pairwise ranking loss with manual SGD.
+    """pairwise ranking loss와 수동 SGD의 한 스텝.
 
-    Math: loss = max(0, margin - (reward_chosen - reward_rejected))
-    This hinge loss pushes the reward model to score chosen sequences higher than
-    rejected sequences by at least `margin`. It is the same objective used to train
-    reward models in InstructGPT, simplified from the full Bradley-Terry framework.
+    수식: loss = max(0, margin - (reward_chosen - reward_rejected))
+    이 hinge loss는 reward model이 chosen 시퀀스를 rejected 시퀀스보다 최소
+    `margin`만큼 높게 점수화하도록 밀어줌. InstructGPT에서 reward model 학습에
+    사용된 것과 동일한 objective이며, 전체 Bradley-Terry 프레임워크를 단순화한 것임.
 
-    Gradients are computed manually via the chain rule because the reward model
-    uses plain floats (not autograd Value objects).
+    reward model이 일반 float를 사용하므로(autograd Value 객체가 아님)
+    gradient를 chain rule로 수동 계산함.
     """
     d_in = len(features_chosen)
 
-    # Forward pass for chosen
+    # Chosen에 대한 forward pass
     hidden_c = []
     pre_relu_c = []
     for i in range(REWARD_HIDDEN):
@@ -383,7 +382,7 @@ def reward_backward(
         hidden_c.append(max(0.0, h))
     score_c = sum(params['w2'][0][j] * hidden_c[j] for j in range(REWARD_HIDDEN)) + params['b2'][0][0]
 
-    # Forward pass for rejected
+    # Rejected에 대한 forward pass
     hidden_r = []
     pre_relu_r = []
     for i in range(REWARD_HIDDEN):
@@ -397,24 +396,24 @@ def reward_backward(
     loss = max(0.0, REWARD_MARGIN - diff)
 
     if loss <= 0.0:
-        # Margin satisfied -- no gradient, no update needed
+        # Margin이 만족됨 -- gradient 없음, 업데이트 불필요
         return loss
 
-    # Backward pass: d_loss/d_diff = -1 (since loss = margin - diff when active)
+    # Backward pass: d_loss/d_diff = -1 (active 상태일 때 loss = margin - diff이므로)
     # d_diff/d_score_c = 1, d_diff/d_score_r = -1
     d_score_c = -1.0  # d_loss/d_score_c
     d_score_r = 1.0   # d_loss/d_score_r
 
-    # Gradient through output layer
+    # Output layer를 통한 gradient
     d_hidden_c = [params['w2'][0][j] * d_score_c for j in range(REWARD_HIDDEN)]
     d_hidden_r = [params['w2'][0][j] * d_score_r for j in range(REWARD_HIDDEN)]
 
-    # Update output layer weights
+    # Output layer 가중치 업데이트
     for j in range(REWARD_HIDDEN):
         params['w2'][0][j] -= lr * (hidden_c[j] * d_score_c + hidden_r[j] * d_score_r)
     params['b2'][0][0] -= lr * (d_score_c + d_score_r)
 
-    # Gradient through ReLU and hidden layer
+    # ReLU와 hidden layer를 통한 gradient
     for i in range(REWARD_HIDDEN):
         relu_grad_c = 1.0 if pre_relu_c[i] > 0 else 0.0
         relu_grad_r = 1.0 if pre_relu_r[i] > 0 else 0.0
@@ -430,31 +429,31 @@ def reward_backward(
 
 def score_completion(token_ids: list[int], vocab_size: int,
                      reward_params: dict[str, list[list[float]]]) -> float:
-    """Score a completion using the reward model, with normalization.
+    """reward model로 completion을 점수화하되, 정규화를 적용함.
 
-    The raw reward model output is centered around zero with unknown scale. We apply
-    a simple normalization: shift so that the mean reward on training-distribution
-    sequences is roughly zero, and scale to unit variance. This is precomputed once
-    after reward model training (see calibration step in Phase 2).
+    raw reward model 출력은 0 근처에 중심이 있고 스케일이 알 수 없음. 단순한
+    정규화를 적용함: 학습 분포 시퀀스에서의 평균 reward가 대략 0이 되도록
+    이동하고, 단위 분산으로 스케일링함. reward model 학습 후 한 번 사전계산됨
+    (Phase 2의 calibration 단계 참조).
 
-    Signpost: Production RLHF systems maintain running statistics of reward model
-    outputs and normalize rewards online. Our static calibration captures the same
-    mechanism with less runtime overhead.
+    참고: 프로덕션 RLHF 시스템은 reward model 출력의 이동 통계를 유지하고
+    reward를 온라인으로 정규화함. 정적 calibration이 동일한 메커니즘을
+    더 적은 런타임 오버헤드로 구현함.
     """
     features = sequence_to_features(token_ids, vocab_size)
     return reward_forward(features, reward_params)
 
 
 # === VALUE FUNCTION (PLAIN FLOATS -- NO AUTOGRAD) ===
-# The value function predicts the expected reward for a given sequence. It serves as a
-# baseline in the advantage computation: advantage = reward - value_baseline.
-# Without this baseline, the policy gradient has high variance (every reward signal
-# is treated as equally informative), making PPO optimization unstable.
-# Signpost: Production RLHF uses GAE (Generalized Advantage Estimation) with a deeper
-# value network. Our single linear layer captures the core variance-reduction mechanism.
+# Value function은 주어진 시퀀스의 기대 reward를 예측함. advantage 계산에서
+# baseline 역할을 함: advantage = reward - value_baseline.
+# 이 baseline 없이는 policy gradient의 분산이 높음 (모든 reward 신호가
+# 동일하게 정보적인 것으로 취급됨), PPO 최적화가 불안정해짐.
+# 참고: 프로덕션 RLHF는 더 깊은 value network와 함께 GAE(Generalized Advantage
+# Estimation)를 사용함. 단일 linear layer가 핵심 분산 감소 메커니즘을 구현함.
 
 def init_value_function(d_in: int) -> dict[str, list[float]]:
-    """Initialize value function: linear layer mapping features to scalar."""
+    """value function 초기화: feature를 scalar로 매핑하는 linear layer."""
     params: dict[str, list[float]] = {}
     params['w'] = [random.gauss(0, 0.01) for _ in range(d_in)]
     params['b'] = [0.0]
@@ -462,7 +461,7 @@ def init_value_function(d_in: int) -> dict[str, list[float]]:
 
 
 def value_forward(features: list[float], params: dict[str, list[float]]) -> float:
-    """Value function forward pass: simple dot product + bias."""
+    """value function forward pass: 단순한 dot product + bias."""
     return sum(params['w'][j] * features[j] for j in range(len(features))) + params['b'][0]
 
 
@@ -472,15 +471,15 @@ def value_update(
     params: dict[str, list[float]],
     lr: float,
 ) -> float:
-    """Update value function with MSE loss: (predicted - target)^2.
+    """MSE loss로 value function 업데이트: (predicted - target)^2.
 
-    Manual SGD: d_loss/d_w[j] = 2 * (pred - target) * features[j]
+    수동 SGD: d_loss/d_w[j] = 2 * (pred - target) * features[j]
     """
     pred = value_forward(features, params)
     error = pred - target
     mse = error ** 2
 
-    # SGD update with gradient clipping for stability
+    # 안정성을 위한 gradient clipping이 포함된 SGD 업데이트
     grad_scale = min(1.0, 1.0 / (abs(error) + 1e-8))
     for j in range(len(features)):
         params['w'][j] -= lr * 2.0 * error * features[j] * grad_scale
@@ -498,11 +497,11 @@ def generate_completion(
     max_len: int,
     temperature: float = 0.8,
 ) -> list[int]:
-    """Generate a token sequence from the policy model using temperature sampling.
+    """temperature sampling으로 policy model에서 토큰 시퀀스를 생성함.
 
-    Returns the generated token IDs (excluding the BOS prefix). This function does NOT
-    build an autograd graph -- it uses .data for sampling, which is correct because
-    we only need the generated tokens, not gradients through the generation process.
+    생성된 토큰 ID를 반환함(BOS 접두사 제외). 이 함수는 autograd graph를 만들지
+    않음 -- sampling에 .data를 사용하며, 생성된 토큰만 필요하고 생성 과정을
+    통한 gradient는 필요 없으므로 올바름.
     """
     keys = [[] for _ in range(N_LAYER)]
     vals = [[] for _ in range(N_LAYER)]
@@ -511,7 +510,7 @@ def generate_completion(
 
     for pos in range(max_len):
         logits = policy_forward(token_id, pos, keys, vals, params)
-        # Temperature sampling: lower T = more greedy, higher T = more exploration
+        # Temperature sampling: 낮은 T = 더 greedy, 높은 T = 더 많은 탐색
         scaled = [logit / temperature for logit in logits]
         probs = softmax(scaled)
         token_id = random.choices(
@@ -529,11 +528,11 @@ def compute_log_probs_detached(
     bos: int,
     params: dict[str, list[list[Value]]],
 ) -> float:
-    """Compute total log-probability of a sequence under the policy (no autograd graph).
+    """policy 하에서 시퀀스의 총 log-probability를 계산함 (autograd graph 없이).
 
-    Used to store "old" log-probs before each PPO update. These become the denominator
-    in the importance sampling ratio: ratio = pi_new(a|s) / pi_old(a|s).
-    Using .data avoids building an autograd graph, since we only need the scalar values.
+    각 PPO 업데이트 전에 "old" log-prob을 저장하는 데 사용됨. 이것이 importance
+    sampling ratio의 분모가 됨: ratio = pi_new(a|s) / pi_old(a|s).
+    .data를 사용하여 autograd graph 구축을 피함. scalar 값만 필요하기 때문임.
     """
     keys = [[] for _ in range(N_LAYER)]
     vals = [[] for _ in range(N_LAYER)]
@@ -542,7 +541,7 @@ def compute_log_probs_detached(
 
     for pos in range(len(token_ids)):
         logits = policy_forward(full_seq[pos], pos, keys, vals, params)
-        # Stable log-softmax: log(softmax(x_i)) = x_i - max(x) - log(sum(exp(x_j - max(x))))
+        # 안정적인 log-softmax: log(softmax(x_i)) = x_i - max(x) - log(sum(exp(x_j - max(x))))
         logit_data = [l.data for l in logits]
         max_l = max(logit_data)
         exp_sum = sum(math.exp(l - max_l) for l in logit_data)
@@ -557,12 +556,11 @@ def compute_log_probs_autograd(
     bos: int,
     params: dict[str, list[list[Value]]],
 ) -> Value:
-    """Compute total log-probability of a sequence WITH autograd graph.
+    """autograd graph와 함께 시퀀스의 총 log-probability를 계산함.
 
-    This is the expensive version used inside the PPO update. The autograd graph must
-    be built because PPO needs gradients of the surrogate objective with respect to
-    the policy parameters. The ratio exp(log_pi_new - log_pi_old) flows through this
-    computation.
+    PPO 업데이트 내부에서 사용되는 비용이 높은 버전임. PPO가 surrogate objective의
+    policy 파라미터에 대한 gradient를 필요로 하므로 autograd graph가 구축되어야 함.
+    ratio exp(log_pi_new - log_pi_old)가 이 계산을 통해 흐름.
     """
     keys = [[] for _ in range(N_LAYER)]
     vals = [[] for _ in range(N_LAYER)]
@@ -582,7 +580,7 @@ def compute_log_probs_autograd(
 if __name__ == "__main__":
     start_time = time.time()
 
-    # -- Prepare vocabulary and data --
+    # -- 어휘와 데이터 준비 --
     print("Loading data...")
     docs = load_data(DATA_URL, DATA_FILE)
     random.shuffle(docs)
@@ -598,7 +596,7 @@ if __name__ == "__main__":
     policy_param_list = flatten_params(policy_params)
     print(f"Policy parameters: {len(policy_param_list):,} (Value class autograd)")
 
-    # Adam optimizer state for policy pretraining
+    # Policy pretraining용 Adam optimizer 상태
     m_pre = [0.0] * len(policy_param_list)
     v_pre = [0.0] * len(policy_param_list)
 
@@ -619,7 +617,7 @@ if __name__ == "__main__":
         loss = (1.0 / seq_len) * sum(losses)
         loss.backward()
 
-        # Adam with linear LR decay
+        # 선형 LR 감쇠가 적용된 Adam
         lr_t = PRETRAIN_LR * (1 - step / PRETRAIN_STEPS)
         for i, p in enumerate(policy_param_list):
             m_pre[i] = BETA1 * m_pre[i] + (1 - BETA1) * p.grad
@@ -634,23 +632,23 @@ if __name__ == "__main__":
 
     print(f"Pretraining complete. Final loss: {loss.data:.4f}")
 
-    # Store reference policy parameters for KL penalty. The reference model is the policy
-    # at the end of pretraining -- a frozen snapshot. In production RLHF, this would be
-    # a separate copy of the model. Here we store the parameter values as plain floats
-    # and temporarily swap them in when computing reference log-probs.
+    # KL penalty를 위한 reference policy 파라미터 저장. Reference model은 pretraining
+    # 종료 시점의 policy -- frozen snapshot임. 프로덕션 RLHF에서는 별도의 모델 복사본이
+    # 됨. 여기서는 파라미터 값을 일반 float로 저장하고, reference log-prob 계산 시
+    # 일시적으로 교체함.
     ref_param_data: dict[str, list[list[float]]] = {}
     for key, matrix in policy_params.items():
         ref_param_data[key] = [[v.data for v in row] for row in matrix]
 
     def compute_ref_log_probs(token_ids: list[int]) -> float:
-        """Compute log-probs under the frozen reference policy.
+        """frozen reference policy 하에서 log-prob을 계산함.
 
-        Temporarily swaps policy parameters to reference values, computes log-probs
-        (detached -- no autograd), then restores current parameters. This avoids
-        storing a second full model. Production RLHF keeps both models in memory;
-        we trade compute for memory since scalar autograd objects are expensive.
+        policy 파라미터를 일시적으로 reference 값으로 교체하고, log-prob을 계산한 뒤
+        (detached -- autograd 없이), 현재 파라미터를 복원함. 두 번째 전체 모델을
+        저장하지 않아도 됨. 프로덕션 RLHF는 두 모델 모두 메모리에 유지하지만,
+        scalar autograd 객체가 비용이 크므로 메모리 대신 연산을 교환함.
         """
-        # Save current params, load reference params
+        # 현재 파라미터 저장, reference 파라미터 로드
         current_data: dict[str, list[list[float]]] = {}
         for key, matrix in policy_params.items():
             current_data[key] = [[v.data for v in row] for row in matrix]
@@ -660,7 +658,7 @@ if __name__ == "__main__":
 
         logp = compute_log_probs_detached(token_ids, BOS, policy_params)
 
-        # Restore current params
+        # 현재 파라미터 복원
         for key, matrix in policy_params.items():
             for r, row in enumerate(matrix):
                 for c, v in enumerate(row):
@@ -671,18 +669,18 @@ if __name__ == "__main__":
     # === Phase 2: Training Reward Model ===
     print("\n=== Phase 2: Training Reward Model ===")
 
-    d_features = VOCAB_SIZE + 1  # character features + length feature
+    d_features = VOCAB_SIZE + 1  # 문자 feature + 길이 feature
     reward_params = init_reward_model(d_features)
     reward_param_count = REWARD_HIDDEN * d_features + REWARD_HIDDEN + REWARD_HIDDEN + 1
     print(f"Reward model parameters: {reward_param_count} (plain floats)")
 
-    # Create synthetic preference pairs from names.txt.
-    # "Chosen" = names with 4-7 characters (well-formed, pronounceable names).
-    # "Rejected" = names with 1-3 characters (too short) or 8+ characters (too long).
-    # This synthetic signal mimics a human annotator who prefers moderate-length names.
-    # The boundary at 3/8 (rather than 2/10) gives the reward model clear signal about
-    # the preferred range. Real RLHF collects human comparisons; we use this heuristic
-    # to demonstrate the same algorithmic pipeline.
+    # names.txt로부터 synthetic preference 쌍을 생성함.
+    # "Chosen" = 4-7자 이름 (잘 형성되고 발음 가능한 이름).
+    # "Rejected" = 1-3자 이름 (너무 짧음) 또는 8자 이상 이름 (너무 김).
+    # 이 synthetic 신호는 적당한 길이의 이름을 선호하는 인간 주석자를 모방함.
+    # 3/8 경계(2/10 대신)는 reward model에 선호 범위에 대한 명확한 신호를 줌.
+    # 실제 RLHF는 인간 비교를 수집하지만, 동일한 알고리즘 파이프라인을
+    # 시연하기 위해 이 휴리스틱을 사용함.
     chosen_names: list[str] = []
     rejected_names: list[str] = []
     for name in docs:
@@ -694,14 +692,14 @@ if __name__ == "__main__":
     random.shuffle(chosen_names)
     random.shuffle(rejected_names)
 
-    # Create preference pairs by zipping chosen and rejected lists
+    # Chosen과 rejected 리스트를 zip하여 preference 쌍 생성
     n_pairs = min(200, len(chosen_names), len(rejected_names))
     preference_pairs: list[tuple[str, str]] = [
         (chosen_names[i], rejected_names[i]) for i in range(n_pairs)
     ]
     print(f"Created {n_pairs} preference pairs")
 
-    # Hold out 20% for evaluation
+    # 평가용 20% 홀드아웃
     split = int(0.8 * n_pairs)
     train_pairs = preference_pairs[:split]
     eval_pairs = preference_pairs[split:]
@@ -728,7 +726,7 @@ if __name__ == "__main__":
             acc = 100.0 * correct / len(eval_pairs)
             print(f"  step {step + 1:>4}/{REWARD_STEPS} | ranking_loss: {rloss:.4f} | accuracy: {acc:.1f}%")
 
-    # Final reward model accuracy
+    # 최종 reward model 정확도
     correct = 0
     for ep in eval_pairs:
         c_tok = [unique_chars.index(ch) for ch in ep[0]]
@@ -740,10 +738,9 @@ if __name__ == "__main__":
     final_acc = 100.0 * correct / len(eval_pairs)
     print(f"Reward model accuracy: {final_acc:.1f}%")
 
-    # Calibrate reward model: compute mean and std on a sample of training-distribution
-    # sequences so we can normalize rewards during PPO. Without normalization, the
-    # absolute reward scale is arbitrary, making the advantage signal hard to interpret
-    # and the KL penalty coefficient hard to tune.
+    # Reward model calibration: 학습 분포 시퀀스 샘플에서 평균과 표준편차를
+    # 계산하여 PPO 중 reward를 정규화함. 정규화 없이는 절대 reward 스케일이
+    # 임의적이어서 advantage 신호의 해석과 KL penalty 계수 튜닝이 어려워짐.
     cal_rewards: list[float] = []
     for name in docs[:200]:
         tok = [unique_chars.index(ch) for ch in name]
@@ -753,16 +750,15 @@ if __name__ == "__main__":
     reward_std = max(math.sqrt(reward_var), 1e-4)
 
     def normalized_reward(token_ids: list[int]) -> float:
-        """Return reward combining the learned reward model with length shaping.
+        """학습된 reward model과 length shaping을 결합한 reward를 반환함.
 
-        The normalized reward model score captures character-level preferences learned
-        from pairwise comparisons. The length shaping term provides an explicit signal
-        for the preferred name length (4-7 chars) because the MLP reward model can
-        have blind spots for out-of-distribution lengths (empty, 1-char sequences)
-        that never appeared in its training data.
+        정규화된 reward model 점수는 pairwise 비교에서 학습한 문자 수준의
+        preference를 포착함. length shaping 항은 MLP reward model이 학습 데이터에
+        없던 분포 밖 길이(빈 시퀀스, 1자 시퀀스)에 대해 blind spot을 가질 수
+        있으므로 선호되는 이름 길이(4-7자)에 대한 명시적 신호를 제공함.
 
-        Signpost: Production RLHF systems also use reward shaping (format penalties,
-        safety classifiers, length bonuses). Our length shaping serves the same role.
+        참고: 프로덕션 RLHF 시스템도 reward shaping(포맷 페널티, 안전성 분류기,
+        길이 보너스)을 사용함. length shaping이 동일한 역할을 함.
         """
         n = len(token_ids)
         if n < MIN_GEN_LEN:
@@ -771,7 +767,7 @@ if __name__ == "__main__":
         raw = score_completion(token_ids, VOCAB_SIZE, reward_params)
         norm = (raw - reward_mean) / reward_std
 
-        # Length shaping: bonus for the preferred range, mild penalty outside it
+        # Length shaping: 선호 범위에 보너스, 범위 밖에 약한 페널티
         if 4 <= n <= 7:
             length_bonus = 1.0
         elif n == 3:
@@ -789,22 +785,22 @@ if __name__ == "__main__":
     print(f"Value function parameters: {value_param_count} (plain floats)")
     print(f"PPO clip epsilon: {PPO_CLIP_EPS} | KL coefficient: {KL_COEFF} (squared penalty)")
 
-    # Fresh Adam state for PPO fine-tuning (do not carry over pretraining momentum,
-    # since the objective has changed from language modeling to reward maximization)
+    # PPO fine-tuning을 위한 새 Adam 상태 (pretraining momentum을 이어가지 않음,
+    # objective가 language modeling에서 reward 최대화로 변경되었으므로)
     m_ppo = [0.0] * len(policy_param_list)
     v_ppo = [0.0] * len(policy_param_list)
 
-    # Store pretrained model state for "before PPO" comparison
+    # "PPO 이전" 비교를 위한 pretrained model 상태 저장
     pretrained_param_data: dict[str, list[list[float]]] = {}
     for key, matrix in policy_params.items():
         pretrained_param_data[key] = [[v.data for v in row] for row in matrix]
 
-    # Track metrics across PPO steps for the final summary
+    # 최종 요약을 위해 PPO 스텝 전체에서 메트릭 추적
     all_rewards: list[float] = []
     all_kl: list[float] = []
 
     for step in range(PPO_STEPS):
-        # --- Step 1: Generate a batch of completions from current policy ---
+        # --- Step 1: 현재 policy에서 completion 배치 생성 ---
         batch_tokens: list[list[int]] = []
         batch_rewards: list[float] = []
         batch_old_logps: list[float] = []
@@ -815,54 +811,54 @@ if __name__ == "__main__":
             gen_tokens = generate_completion(
                 policy_params, BOS, VOCAB_SIZE, MAX_GEN_LEN, temperature=0.8
             )
-            # Ensure non-empty completion (degenerate empty sequences give no gradient signal)
+            # 비어있지 않은 completion 보장 (퇴화된 빈 시퀀스는 gradient 신호를 주지 않음)
             if not gen_tokens:
                 gen_tokens = [random.randint(0, VOCAB_SIZE - 2)]
 
             batch_tokens.append(gen_tokens)
 
-            # --- Step 2: Score with normalized reward model ---
+            # --- Step 2: 정규화된 reward model로 점수화 ---
             reward = normalized_reward(gen_tokens)
             batch_rewards.append(reward)
             features = sequence_to_features(gen_tokens, VOCAB_SIZE)
             batch_features.append(features)
 
-            # --- Step 5: Store old log-probs (before parameter update) ---
+            # --- Step 5: old log-prob 저장 (파라미터 업데이트 전) ---
             old_logp = compute_log_probs_detached(gen_tokens, BOS, policy_params)
             batch_old_logps.append(old_logp)
 
-            # Reference log-probs for KL penalty
+            # KL penalty를 위한 reference log-prob
             ref_logp = compute_ref_log_probs(gen_tokens)
             batch_ref_logps.append(ref_logp)
 
-        # --- Step 3: Compute value baselines and advantages ---
+        # --- Step 3: value baseline과 advantage 계산 ---
         batch_advantages: list[float] = []
         for i in range(BATCH_SIZE):
             val = value_forward(batch_features[i], value_params)
-            # Advantage = reward - baseline. This centers the reward signal so the policy
-            # gradient has lower variance: actions that are better than average get positive
-            # advantage (reinforced), worse than average get negative (discouraged).
-            # Without the baseline, all rewards > 0 would reinforce all actions equally.
+            # Advantage = reward - baseline. reward 신호를 중심화하여 policy gradient의
+            # 분산을 낮춤: 평균보다 좋은 action은 양의 advantage(강화됨),
+            # 평균보다 나쁜 action은 음의 advantage(억제됨).
+            # Baseline 없이는 reward > 0인 모든 action이 동일하게 강화됨.
             batch_advantages.append(batch_rewards[i] - val)
 
-        # --- Step 6: PPO update (through autograd) ---
-        # The PPO clipped surrogate objective prevents catastrophically large updates.
-        # Math: L_clip = min(ratio * A, clip(ratio, 1-eps, 1+eps) * A)
-        # where ratio = pi_new(a|s) / pi_old(a|s) = exp(log_pi_new - log_pi_old)
-        # and A is the advantage.
+        # --- Step 6: PPO 업데이트 (autograd를 통해) ---
+        # PPO clipped surrogate objective가 치명적으로 큰 업데이트를 방지함.
+        # 수식: L_clip = min(ratio * A, clip(ratio, 1-eps, 1+eps) * A)
+        # 여기서 ratio = pi_new(a|s) / pi_old(a|s) = exp(log_pi_new - log_pi_old)
+        # 이고 A는 advantage임.
         #
-        # Intuition: vanilla policy gradient uses ratio * A, which can produce huge
-        # updates when the ratio is large (policy changed a lot). PPO clips the ratio
-        # to [1-eps, 1+eps], bounding the step size. This is the "proximal" constraint:
-        # stay close to the old policy.
+        # 직관: vanilla policy gradient는 ratio * A를 사용하는데, ratio가 클 때
+        # (policy가 많이 변한 경우) 거대한 업데이트가 발생할 수 있음. PPO는 ratio를
+        # [1-eps, 1+eps]로 clamp하여 스텝 크기를 제한함. 이것이 "proximal" 제약:
+        # old policy에 가깝게 유지함.
         total_ppo_loss = Value(0.0)
         total_kl = 0.0
 
         for i in range(BATCH_SIZE):
-            # Compute current log-prob WITH autograd (expensive but necessary)
+            # 현재 log-prob을 autograd와 함께 계산 (비용이 크지만 필수)
             current_logp = compute_log_probs_autograd(batch_tokens[i], BOS, policy_params)
 
-            # Importance sampling ratio: how much has the policy changed for this completion?
+            # Importance sampling ratio: 이 completion에 대해 policy가 얼마나 변했는지
             # ratio = pi_new(a|s) / pi_old(a|s) = exp(log_pi_new - log_pi_old)
             log_ratio = current_logp - batch_old_logps[i]
             ratio = log_ratio.exp()
@@ -872,48 +868,48 @@ if __name__ == "__main__":
             surr1 = ratio * adv                                                    # unclipped
             surr2 = ratio.clip(1.0 - PPO_CLIP_EPS, 1.0 + PPO_CLIP_EPS) * adv    # clipped
 
-            # Take the minimum: this is conservative. When advantage > 0 (good action),
-            # we don't let the ratio exceed 1+eps (prevent over-reinforcing). When
-            # advantage < 0 (bad action), we don't let the ratio go below 1-eps
-            # (prevent over-penalizing). Either way, the update is bounded.
+            # 최솟값을 취함: 보수적임. advantage > 0(좋은 action)일 때 ratio가
+            # 1+eps를 초과하지 못하게 함(과도한 강화 방지). advantage < 0(나쁜 action)
+            # 일 때 ratio가 1-eps 아래로 내려가지 못하게 함(과도한 페널티 방지).
+            # 어느 경우든 업데이트가 제한됨.
             if surr1.data < surr2.data:
                 ppo_obj = surr1
             else:
                 ppo_obj = surr2
 
-            # KL penalty: discourages the policy from drifting too far from the reference.
-            # Without this, the policy would collapse to a degenerate distribution that
-            # maximizes the (imperfect) reward model -- "reward hacking". The KL term
-            # preserves the reference model's language modeling quality.
+            # KL penalty: policy가 reference에서 너무 멀리 벗어나는 것을 억제함.
+            # 이것 없이는 policy가 (불완전한) reward model을 최대화하는 퇴화된
+            # 분포로 붕괴됨 -- "reward hacking". KL 항이 reference model의
+            # language modeling 품질을 보존함.
             #
-            # We use a squared log-ratio penalty: 0.5 * (log_pi - log_pi_ref)^2
-            # Unlike the raw log-ratio (which can be negative for individual samples),
-            # the squared form is always >= 0 and penalizes divergence in both directions.
-            # This is equivalent to the Schulman (2020) "KL penalty" variant.
+            # Squared log-ratio penalty를 사용함: 0.5 * (log_pi - log_pi_ref)^2
+            # raw log-ratio(개별 샘플에서 음수가 될 수 있음)와 달리,
+            # squared 형태는 항상 >= 0이고 양방향 발산에 페널티를 줌.
+            # Schulman (2020)의 "KL penalty" 변형과 동일함.
             kl_per_sample = current_logp.data - batch_ref_logps[i]
             total_kl += abs(kl_per_sample)
 
-            # Squared KL penalty through autograd so gradients flow back to policy
+            # autograd를 통한 squared KL penalty로 gradient가 policy로 흐름
             log_diff = current_logp - batch_ref_logps[i]
             kl_penalty = KL_COEFF * log_diff * log_diff * 0.5
 
-            # Total loss: negate PPO objective (we minimize loss, PPO maximizes objective)
-            # plus KL penalty term (always positive, pushes policy toward reference)
+            # 총 loss: PPO objective를 부정(loss를 최소화하는데 PPO는 objective를 최대화함)
+            # + KL penalty 항(항상 양수, policy를 reference 방향으로 밀어줌)
             sample_loss = -ppo_obj + kl_penalty
             total_ppo_loss = total_ppo_loss + sample_loss
 
-        # Average over batch
+        # 배치에 대해 평균
         ppo_loss = total_ppo_loss * (1.0 / BATCH_SIZE)
         avg_kl = total_kl / BATCH_SIZE
         avg_reward = sum(batch_rewards) / BATCH_SIZE
 
-        # Backward pass and Adam update on policy parameters only
+        # Backward pass와 policy 파라미터에 대한 Adam 업데이트
         ppo_loss.backward()
 
         lr_t = PPO_LR * (1 - step / PPO_STEPS)
         for i, p in enumerate(policy_param_list):
-            # Gradient clipping: prevent exploding gradients from the multi-step computation
-            # graph (policy forward pass runs multiple times per PPO step across the batch).
+            # Gradient clipping: 다중 스텝 computation graph(PPO 스텝당 배치 전체에서
+            # policy forward pass가 여러 번 실행됨)에서의 exploding gradient 방지
             grad = max(-1.0, min(1.0, p.grad))
             m_ppo[i] = BETA1 * m_ppo[i] + (1 - BETA1) * grad
             v_ppo[i] = BETA2 * v_ppo[i] + (1 - BETA2) * grad ** 2
@@ -922,7 +918,7 @@ if __name__ == "__main__":
             p.data -= lr_t * m_hat / (v_hat ** 0.5 + EPS_ADAM)
             p.grad = 0.0
 
-        # --- Step 7: Update value function with MSE loss ---
+        # --- Step 7: MSE loss로 value function 업데이트 ---
         for i in range(BATCH_SIZE):
             value_update(batch_features[i], batch_rewards[i], value_params, VALUE_LR)
 
@@ -936,7 +932,7 @@ if __name__ == "__main__":
     # === Results ===
     print("\n=== Results ===")
 
-    # Generate from pretrained model (before PPO) by temporarily restoring weights
+    # pretrained model(PPO 이전)에서 생성하기 위해 일시적으로 가중치 복원
     current_data_backup: dict[str, list[list[float]]] = {}
     for key, matrix in policy_params.items():
         current_data_backup[key] = [[v.data for v in row] for row in matrix]
@@ -955,7 +951,7 @@ if __name__ == "__main__":
         pre_lengths.append(len(gen))
         print(f"  {i + 1:>2}. {name:10s} (reward: {shaped_r:+.2f}, len: {len(gen)})")
 
-    # Restore PPO-trained weights
+    # PPO로 학습된 가중치 복원
     for key, matrix in policy_params.items():
         for r, row in enumerate(matrix):
             for c, v in enumerate(row):

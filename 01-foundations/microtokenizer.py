@@ -1,11 +1,13 @@
 """
-How text becomes numbers -- the compression algorithm hiding inside every LLM.
-Byte-Pair Encoding learns a vocabulary by iteratively merging the most frequent
-adjacent token pairs, then encodes new text by replaying those merges in priority order.
+텍스트가 숫자로 변하는 과정 -- 모든 LLM 안에 숨어 있는 압축 알고리즘.
+Byte-Pair Encoding은 가장 빈번한 인접 토큰 쌍을 반복적으로 병합하여 어휘를 학습하고,
+새로운 텍스트를 인코딩할 때 학습된 병합을 우선순위 순서대로 재생함.
 """
 # Reference: Philip Gage, "A New Algorithm for Data Compression" (1994).
 # GPT-2's byte-level BPE variant (Radford et al., 2019) starts from raw bytes
 # rather than characters -- that's the version implemented here.
+# GPT-2의 바이트 수준 BPE 변형(Radford et al., 2019)은 문자가 아닌 원시 바이트에서
+# 시작함 -- 여기서 구현한 것이 그 버전임.
 
 from __future__ import annotations
 
@@ -14,14 +16,14 @@ import random
 import urllib.request
 from collections import Counter
 
-random.seed(42)  # repo convention; BPE itself is fully deterministic
+random.seed(42)  # 레포 관례; BPE 자체는 완전히 결정적임
 
 
 # === CONSTANTS ===
 
-NUM_MERGES = 256  # Final vocab = 256 byte tokens + 256 merges = 512 tokens.
-# Signpost: production tokenizers (GPT-2, GPT-4) use 50K+ merges trained on
-# hundreds of gigabytes. 256 merges on 18KB is a toy, but the algorithm is identical.
+NUM_MERGES = 256  # 최종 어휘 = 256 바이트 토큰 + 256 병합 = 512 토큰.
+# 참고: 프로덕션 토크나이저(GPT-2, GPT-4)는 수백 기가바이트에서 학습된 50K+ 병합을 사용함.
+# 18KB에 대한 256 병합은 장난감 수준이지만, 알고리즘은 동일함.
 
 DATA_URL = "https://raw.githubusercontent.com/karpathy/makemore/master/names.txt"
 DATA_FILE = "names.txt"
@@ -30,7 +32,7 @@ DATA_FILE = "names.txt"
 # === DATA LOADING ===
 
 def load_data(url: str, filename: str) -> bytes:
-    """Download dataset if not cached, return raw bytes."""
+    """캐시되지 않은 경우 데이터셋을 다운로드하고, 원시 바이트를 반환함."""
     if not os.path.exists(filename):
         print(f"Downloading {filename}...")
         urllib.request.urlretrieve(url, filename)
@@ -41,32 +43,32 @@ def load_data(url: str, filename: str) -> bytes:
 # === BPE TRAINING ===
 
 def get_pair_counts(token_ids: list[int]) -> Counter:
-    """Count frequency of every adjacent token pair.
+    """모든 인접 토큰 쌍의 빈도를 셈.
 
-    For sequence s = [s_0, s_1, ..., s_n], we count all (s_i, s_{i+1}) pairs.
-    Example: [a, b, c, b, c] -> {(a,b): 1, (b,c): 2, (c,b): 1}.
-    This is the core statistic BPE uses to decide what to merge next.
+    시퀀스 s = [s_0, s_1, ..., s_n]에서 모든 (s_i, s_{i+1}) 쌍을 셈.
+    예시: [a, b, c, b, c] -> {(a,b): 1, (b,c): 2, (c,b): 1}.
+    BPE가 다음에 무엇을 병합할지 결정하는 데 사용하는 핵심 통계임.
     """
-    # zip(ids, ids[1:]) pairs each element with its right neighbor -- O(n).
+    # zip(ids, ids[1:])는 각 원소를 오른쪽 이웃과 짝지음 -- O(n).
     return Counter(zip(token_ids, token_ids[1:]))
 
 
 def apply_merge(token_ids: list[int], pair: tuple[int, int], new_id: int) -> list[int]:
-    """Replace every occurrence of `pair` with `new_id` in a single left-to-right pass.
+    """왼쪽에서 오른쪽으로 한 번 스캔하며 `pair`의 모든 출현을 `new_id`로 교체함.
 
-    Overlapping pairs resolve left-to-right: in [a, a, a] merging (a,a) produces
-    [new, a], not [a, new]. This matches the standard BPE convention and ensures
-    the merge operation is deterministic regardless of pair overlap patterns.
+    겹치는 쌍은 왼쪽에서 오른쪽으로 해소됨: [a, a, a]에서 (a,a)를 병합하면
+    [new, a]가 됨, [a, new]가 아님. 이것이 표준 BPE 관례이며, 쌍 겹침 패턴에
+    관계없이 병합 연산이 결정적임을 보장함.
     """
-    # Signpost: this O(n) scan runs once per merge, giving O(n * M) total training
-    # cost for M merges. Production implementations (SentencePiece, tiktoken) use
-    # priority queues for O(n log n) total, but the output is identical.
+    # 참고: 이 O(n) 스캔은 병합당 한 번 실행되어, M번 병합에 총 O(n * M) 학습
+    # 비용이 듦. 프로덕션 구현(SentencePiece, tiktoken)은 총 O(n log n)을 위해
+    # 우선순위 큐를 쓰지만, 출력은 동일함.
     merged = []
     i = 0
     while i < len(token_ids):
         if i < len(token_ids) - 1 and (token_ids[i], token_ids[i + 1]) == pair:
             merged.append(new_id)
-            i += 2  # consumed both tokens in the pair
+            i += 2  # 쌍의 두 토큰을 소비함
         else:
             merged.append(token_ids[i])
             i += 1
@@ -76,29 +78,28 @@ def apply_merge(token_ids: list[int], pair: tuple[int, int], new_id: int) -> lis
 def train_bpe(
     token_ids: list[int], num_merges: int
 ) -> list[tuple[tuple[int, int], int]]:
-    """Learn BPE merge rules by greedily merging the most frequent adjacent pair.
+    """가장 빈번한 인접 쌍을 탐욕적으로 병합하여 BPE 병합 규칙을 학습함.
 
-    Each merge absorbs the single most redundant pair in the corpus -- a greedy
-    compression step that naturally discovers morphological units ("an" + "a",
-    "el" + "la") without any linguistic rules. The merge table is ordered by
-    priority: merge 0 was most frequent in the original corpus, merge 1 most
-    frequent after merge 0, and so on. This ordering is critical for encoding.
+    각 병합은 코퍼스에서 가장 중복된 단일 쌍을 흡수함 -- 언어적 규칙 없이
+    형태소 단위("an" + "a", "el" + "la")를 자연스럽게 발견하는 탐욕적 압축 단계임.
+    병합 테이블은 우선순위로 정렬됨: 병합 0이 원래 코퍼스에서 가장 빈번했고,
+    병합 1이 병합 0 이후에 가장 빈번했고, 이런 식으로 계속됨. 이 순서가 인코딩에 중요함.
 
-    Returns: ordered list of (pair, new_id) tuples where new_id = 256 + merge_index.
+    반환: (pair, new_id) 튜플의 정렬된 리스트, new_id = 256 + merge_index.
     """
-    ids = list(token_ids)  # work on a copy
+    ids = list(token_ids)  # 복사본에서 작업함
     merges: list[tuple[tuple[int, int], int]] = []
 
     for i in range(num_merges):
         counts = get_pair_counts(ids)
         if not counts:
-            # Entire corpus collapsed to a single token (or is empty). Rare in
-            # practice, but correct to handle: no more pairs means no more merges.
+            # 전체 코퍼스가 단일 토큰으로 축소됨 (또는 비어 있음). 실제로는 드물지만,
+            # 올바르게 처리해야 함: 더 이상 쌍이 없으면 더 이상 병합할 수 없음.
             break
 
-        # The pair with the highest count gets merged next.
+        # 가장 높은 빈도를 가진 쌍이 다음에 병합됨.
         pair = max(counts, key=counts.get)  # type: ignore[arg-type]
-        new_id = 256 + i  # byte IDs 0-255 reserved; merges start at 256
+        new_id = 256 + i  # 바이트 ID 0-255는 예약됨; 병합은 256부터 시작함
 
         ids = apply_merge(ids, pair, new_id)
         merges.append((pair, new_id))
@@ -117,12 +118,12 @@ def train_bpe(
 # === ENCODING & DECODING ===
 
 def build_vocab(merges: list[tuple[tuple[int, int], int]]) -> dict[int, bytes]:
-    """Build token ID -> bytes lookup table.
+    """토큰 ID -> bytes 조회 테이블을 구축함.
 
-    Base vocabulary: 256 entries mapping each byte value to its single-byte string.
-    Each merge extends the table: vocab[new_id] = vocab[a] + vocab[b].
-    This recursive expansion means decoding is just a table lookup -- no merge
-    replay needed, and round-trip correctness is guaranteed by construction.
+    기본 어휘: 각 바이트 값을 단일 바이트 문자열로 매핑하는 256개 항목.
+    각 병합은 테이블을 확장함: vocab[new_id] = vocab[a] + vocab[b].
+    이 재귀적 확장 덕분에 디코딩은 단순한 테이블 조회로 가능함 -- 병합을 재생할
+    필요가 없고, 왕복 정확성이 구조적으로 보장됨.
     """
     vocab: dict[int, bytes] = {i: bytes([i]) for i in range(256)}
     for (a, b), new_id in merges:
@@ -131,18 +132,17 @@ def build_vocab(merges: list[tuple[tuple[int, int], int]]) -> dict[int, bytes]:
 
 
 def encode(text: str, merges: list[tuple[tuple[int, int], int]]) -> list[int]:
-    """Encode a string to BPE token IDs by replaying merges in priority order.
+    """병합을 우선순위 순서로 재생하여 문자열을 BPE 토큰 ID로 인코딩함.
 
-    Critical: merges are applied in the order they were learned (priority order),
-    NOT by re-counting frequencies on the new text. Priority order ensures
-    deterministic tokenization -- the same string always produces the same token
-    sequence, regardless of what other text the tokenizer was trained on.
-    Re-counting frequencies would make the output dependent on the input batch,
-    breaking the contract that tokenization is a pure function of the input string.
+    중요: 병합은 학습된 순서(우선순위 순서)로 적용되며, 새 텍스트에서 빈도를 다시
+    세는 것이 아님. 우선순위 순서가 결정적 토큰화를 보장함 -- 같은 문자열은 항상
+    같은 토큰 시퀀스를 생성하며, 토크나이저가 어떤 다른 텍스트에서 학습되었든
+    상관없음. 빈도를 다시 세면 출력이 입력 배치에 의존하게 되어, 토큰화가 입력
+    문자열의 순수 함수라는 계약을 깨뜨림.
     """
-    # Signpost: this O(n * M) naive encoding checks every merge against the full
-    # sequence. Production tokenizers (tiktoken, HuggingFace) use trie structures
-    # for O(n) encoding, but produce identical output.
+    # 참고: 이 O(n * M) 단순 인코딩은 매 병합을 전체 시퀀스에 대해 확인함.
+    # 프로덕션 토크나이저(tiktoken, HuggingFace)는 O(n) 인코딩을 위해 trie 구조를
+    # 쓰지만, 동일한 출력을 생성함.
     token_ids = list(text.encode("utf-8"))
     for pair, new_id in merges:
         token_ids = apply_merge(token_ids, pair, new_id)
@@ -150,11 +150,11 @@ def encode(text: str, merges: list[tuple[tuple[int, int], int]]) -> list[int]:
 
 
 def decode(token_ids: list[int], vocab: dict[int, bytes]) -> str:
-    """Decode token IDs back to a string via byte lookup and UTF-8 decoding.
+    """바이트 조회와 UTF-8 디코딩으로 토큰 ID를 문자열로 되돌림.
 
-    Every token maps to a definite byte sequence through the vocab table, so
-    decode(encode(text)) == text is guaranteed for any valid UTF-8 input.
-    Decoding is trivially simple by design -- all the complexity lives in encoding.
+    모든 토큰은 vocab 테이블을 통해 확정된 바이트 시퀀스에 매핑되므로,
+    유효한 UTF-8 입력에 대해 decode(encode(text)) == text가 보장됨.
+    디코딩은 설계상 매우 단순함 -- 모든 복잡성은 인코딩에 있음.
     """
     raw_bytes = b"".join(vocab[tid] for tid in token_ids)
     return raw_bytes.decode("utf-8")
@@ -163,26 +163,26 @@ def decode(token_ids: list[int], vocab: dict[int, bytes]) -> str:
 # === INFERENCE DEMO ===
 
 if __name__ == "__main__":
-    # -- Load and prepare data --
+    # -- 데이터 로드 및 준비 --
     raw = load_data(DATA_URL, DATA_FILE)
     corpus_ids = list(raw)
 
-    # Starting from raw bytes means every possible input is representable --
-    # there are no "unknown token" problems. This is the key insight of byte-level
-    # BPE: the base vocabulary covers all of Unicode (via UTF-8 byte sequences)
-    # without needing a character-level vocabulary for every writing system.
+    # 원시 바이트에서 시작한다는 것은 모든 가능한 입력을 표현할 수 있다는 뜻임 --
+    # "알 수 없는 토큰" 문제가 없음. 이것이 바이트 수준 BPE의 핵심 통찰임:
+    # 기본 어휘가 모든 유니코드를 (UTF-8 바이트 시퀀스를 통해) 커버하므로
+    # 모든 문자 체계에 대한 문자 수준 어휘가 필요 없음.
     print(f"Corpus: {len(raw):,} bytes, base vocab: 256 byte tokens")
     print(f"Training {NUM_MERGES} merges (final vocab: {256 + NUM_MERGES} tokens)\n")
 
-    # -- Train --
+    # -- 학습 --
     print("Training BPE...")
     merges = train_bpe(corpus_ids, NUM_MERGES)
     vocab = build_vocab(merges)
     print(f"\nTraining complete: {len(merges)} merges learned\n")
 
-    # -- Round-trip tests --
-    # Verify encode-decode identity on diverse inputs: common name, uncommon name,
-    # hyphenated, apostrophe, empty string, single character.
+    # -- 왕복 테스트 --
+    # 다양한 입력에서 encode-decode 항등성을 검증함: 일반 이름, 희귀 이름,
+    # 하이픈, 아포스트로피, 빈 문자열, 단일 문자.
     test_strings = ["Emma", "Xiomara", "Mary-Jane", "O'Brien", "", "Z"]
     print("Round-trip tests:")
     all_pass = True
@@ -196,10 +196,10 @@ if __name__ == "__main__":
         print(f"  [{status}] {display:<14} -> {len(encoded):>2} tokens -> {decoded!r}")
     print()
 
-    # -- Compression ratio --
+    # -- 압축률 --
     # compression_ratio = len(original_bytes) / len(bpe_tokens)
-    # Each BPE token represents `ratio` bytes on average. Higher is better --
-    # it means the tokenizer discovered more compressible structure.
+    # 각 BPE 토큰이 평균적으로 `ratio`바이트를 나타냄. 높을수록 좋음 --
+    # 토크나이저가 더 압축 가능한 구조를 발견했다는 뜻임.
     corpus_text = raw.decode("utf-8")
     corpus_encoded = encode(corpus_text, merges)
     ratio = len(raw) / len(corpus_encoded)
@@ -208,7 +208,7 @@ if __name__ == "__main__":
         f"(ratio: {ratio:.2f}x)\n"
     )
 
-    # -- Top 20 merges --
+    # -- 상위 20개 병합 --
     print("Top 20 merges (earliest = highest priority):")
     for i, ((a, b), new_id) in enumerate(merges[:20]):
         a_str = vocab[a].decode("utf-8", errors="replace")
@@ -217,7 +217,7 @@ if __name__ == "__main__":
         print(f"  {i + 1:>2}. {a_str!r:>6} + {b_str!r:<6} -> {merged_str!r}")
     print()
 
-    # -- Tokenization example --
+    # -- 토큰화 예시 --
     example = "Elizabeth"
     example_tokens = encode(example, merges)
     pieces = [vocab[tid].decode("utf-8", errors="replace") for tid in example_tokens]

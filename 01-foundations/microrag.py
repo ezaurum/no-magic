@@ -1,6 +1,6 @@
 """
-How retrieval augments generation -- the simplest system that actually works, with BM25
-search and a character-level MLP in pure Python.
+retrieval이 generation을 어떻게 보강하는지 -- BM25 검색과 character-level MLP로
+실제로 동작하는 가장 간단한 시스템, 순수 Python 구현.
 """
 # Reference: RAG architecture inspired by "Retrieval-Augmented Generation for
 # Knowledge-Intensive NLP Tasks" (Lewis et al., 2020), BM25 scoring from Robertson
@@ -18,31 +18,31 @@ random.seed(42)
 # === CONSTANTS ===
 
 LEARNING_RATE = 0.01
-HIDDEN_DIM = 64  # hidden layer size for MLP
+HIDDEN_DIM = 64  # MLP의 hidden layer 크기
 NUM_EPOCHS = 300
-TOP_K = 3  # retrieve top 3 documents
+TOP_K = 3  # 상위 3개 문서를 검색함
 BATCH_SIZE = 5
 
-# BM25 hyperparameters (standard values from information retrieval literature)
-K1 = 1.2  # term frequency saturation parameter
-B = 0.75  # document length normalization parameter
+# BM25 hyperparameter (정보 검색 분야의 표준 값)
+K1 = 1.2  # term frequency 포화 파라미터
+B = 0.75  # 문서 길이 정규화 파라미터
 
-CHAR_VOCAB = list(string.ascii_lowercase + " .,")  # character vocabulary
+CHAR_VOCAB = list(string.ascii_lowercase + " .,")  # 문자 vocabulary
 VOCAB_SIZE = len(CHAR_VOCAB)
 
 
 # === SYNTHETIC KNOWLEDGE BASE ===
 
 def generate_knowledge_base() -> tuple[list[str], list[tuple[str, str]]]:
-    """Generate 100 synthetic factual paragraphs and 20 test queries.
+    """합성 factual 문단 100개와 테스트 query 20개를 생성함.
 
-    We use templates + data tables to create verifiable factual knowledge about
-    cities, countries, populations, and geography. This ensures deterministic,
-    reproducible data without external downloads or API calls.
+    template + 데이터 테이블을 사용해 도시, 국가, 인구, 지리에 대한 검증 가능한
+    factual knowledge를 생성함. 외부 다운로드나 API 호출 없이 결정적이고
+    재현 가능한 데이터를 보장함.
 
-    Returns: (documents, test_queries) where test_queries are (query, expected_doc_index)
+    Returns: (documents, test_queries), test_queries는 (query, expected_doc_index) 쌍임
     """
-    # Data tables -- these are the "ground truth" facts
+    # 데이터 테이블 -- "ground truth" 사실들
     cities = [
         ("Paris", "France", "2.1 million", "Seine"),
         ("London", "United Kingdom", "8.9 million", "Thames"),
@@ -64,7 +64,7 @@ def generate_knowledge_base() -> tuple[list[str], list[tuple[str, str]]]:
         ("Denali", "United States", "6190 meters"),
     ]
 
-    # Generate city paragraphs
+    # 도시 문단 생성
     documents = []
     for city, country, pop, river in cities:
         doc = (
@@ -74,7 +74,7 @@ def generate_knowledge_base() -> tuple[list[str], list[tuple[str, str]]]:
         )
         documents.append(doc.lower())
 
-    # Generate mountain paragraphs
+    # 산 문단 생성
     for mountain, country, height in mountains:
         doc = (
             f"{mountain} is located in {country}. "
@@ -83,7 +83,7 @@ def generate_knowledge_base() -> tuple[list[str], list[tuple[str, str]]]:
         )
         documents.append(doc.lower())
 
-    # Generate additional filler documents (continent facts, simple statements)
+    # 추가 filler 문서 생성 (대륙 사실, 간단한 서술)
     continents = [
         "africa is the second largest continent by area.",
         "asia is the most populous continent in the world.",
@@ -93,9 +93,9 @@ def generate_knowledge_base() -> tuple[list[str], list[tuple[str, str]]]:
     ]
     documents.extend(continents)
 
-    # Add more diverse factual statements to reach 100 documents
+    # 100개 문서를 채우기 위해 다양한 factual 서술을 추가함
     for i in range(80):
-        # Recombine facts with slight variations to create more documents
+        # 약간의 변형을 주어 사실을 재조합해 더 많은 문서를 생성함
         if i % 4 == 0:
             city, country, pop, river = cities[i % len(cities)]
             doc = f"The population of {city} is about {pop}. It is in {country}."
@@ -110,18 +110,18 @@ def generate_knowledge_base() -> tuple[list[str], list[tuple[str, str]]]:
             doc = f"{city} is a major city with population {pop}."
         documents.append(doc.lower())
 
-    # Generate test queries with known correct answers (document index)
+    # 정답이 알려진 테스트 query 생성 (문서 인덱스)
     test_queries = [
-        ("population of paris", 0),  # Paris doc
-        ("seine river", 0),  # Paris doc mentions Seine
-        ("tokyo population", 5),  # Tokyo doc
-        ("everest height", 10),  # Everest doc
-        ("capital of germany", 2),  # Berlin doc
-        ("nile river", 8),  # Cairo doc mentions Nile
-        ("kilimanjaro tanzania", 12),  # Kilimanjaro doc
-        ("thames river london", 1),  # London doc
-        ("mont blanc france", 13),  # Mont Blanc doc
-        ("beijing china", 6),  # Beijing doc
+        ("population of paris", 0),  # Paris 문서
+        ("seine river", 0),  # Paris 문서에 Seine이 언급됨
+        ("tokyo population", 5),  # Tokyo 문서
+        ("everest height", 10),  # Everest 문서
+        ("capital of germany", 2),  # Berlin 문서
+        ("nile river", 8),  # Cairo 문서에 Nile이 언급됨
+        ("kilimanjaro tanzania", 12),  # Kilimanjaro 문서
+        ("thames river london", 1),  # London 문서
+        ("mont blanc france", 13),  # Mont Blanc 문서
+        ("beijing china", 6),  # Beijing 문서
     ]
 
     return documents, test_queries
@@ -130,13 +130,13 @@ def generate_knowledge_base() -> tuple[list[str], list[tuple[str, str]]]:
 # === TOKENIZATION ===
 
 def tokenize(text: str) -> list[str]:
-    """Simple word-level tokenization: lowercase, strip punctuation, split on spaces.
+    """간단한 word-level tokenization: 소문자 변환, 구두점 제거, 공백으로 분리함.
 
-    Signpost: production RAG systems use learned subword tokenizers (BPE, SentencePiece).
-    Word-level tokenization is sufficient here for demonstrating retrieval mechanics --
-    the focus is on BM25 scoring and context injection, not tokenization quality.
+    Signpost: 프로덕션 RAG 시스템은 학습된 subword tokenizer(BPE, SentencePiece)를 사용함.
+    여기서는 retrieval 메커니즘을 보여주는 것이 목적이므로 word-level tokenization으로 충분함 --
+    BM25 scoring과 context 주입에 초점을 맞추며, tokenization 품질은 중요하지 않음.
     """
-    # Remove punctuation and split into words
+    # 구두점을 제거하고 단어로 분리함
     words = []
     word = []
     for char in text.lower():
@@ -153,13 +153,13 @@ def tokenize(text: str) -> list[str]:
 # === BM25 INDEX ===
 
 class BM25Index:
-    """BM25 scoring for document retrieval.
+    """문서 검색을 위한 BM25 scoring.
 
-    BM25 improves on TF-IDF with two key insights:
-    1. TF saturation: 10 occurrences isn't 10x more relevant than 1 occurrence.
-       The formula uses (tf * (k1 + 1)) / (tf + k1) which saturates as tf → ∞.
-    2. Document length normalization: long documents aren't inherently more relevant.
-       The normalization term (1 - b + b * dl/avgdl) penalizes long docs.
+    BM25는 TF-IDF를 두 가지 핵심 통찰로 개선함:
+    1. TF 포화: 10번 등장이 1번 등장보다 10배 더 관련 있는 것은 아님.
+       수식 (tf * (k1 + 1)) / (tf + k1)은 tf → ∞일 때 포화됨.
+    2. 문서 길이 정규화: 긴 문서가 본질적으로 더 관련 있는 것은 아님.
+       정규화 항 (1 - b + b * dl/avgdl)이 긴 문서에 페널티를 줌.
 
     Math-to-code mapping:
       idf(term) = log((N - df + 0.5) / (df + 0.5) + 1)
@@ -167,30 +167,30 @@ class BM25Index:
       BM25(query, doc) = Σ_{term in query} idf(term) * tf_score(term, doc)
 
     where:
-      N = total documents
-      df = number of docs containing term
-      tf = term frequency in document
-      dl = document length (word count)
-      avgdl = average document length across corpus
-      k1 = TF saturation parameter (1.2 standard)
-      b = length normalization parameter (0.75 standard)
+      N = 전체 문서 수
+      df = term을 포함하는 문서 수
+      tf = 문서 내 term 빈도
+      dl = 문서 길이 (단어 수)
+      avgdl = 코퍼스 전체의 평균 문서 길이
+      k1 = TF 포화 파라미터 (1.2가 표준)
+      b = 길이 정규화 파라미터 (0.75가 표준)
     """
 
     def __init__(self, documents: list[str], k1: float = K1, b: float = B):
         self.documents = documents
         self.k1 = k1
         self.b = b
-        self.N = len(documents)  # total number of documents
+        self.N = len(documents)  # 전체 문서 수
 
-        # Tokenize all documents
+        # 모든 문서를 tokenize함
         self.doc_tokens = [tokenize(doc) for doc in documents]
         self.doc_lengths = [len(tokens) for tokens in self.doc_tokens]
         self.avgdl = sum(self.doc_lengths) / self.N if self.N > 0 else 0
 
-        # Build inverted index: term -> list of (doc_id, term_frequency)
-        # This is the core data structure for efficient retrieval -- for each term,
-        # we precompute which documents contain it and how often. At query time we
-        # only score documents that share at least one term with the query.
+        # inverted index 구축: term -> (doc_id, term_frequency) 리스트
+        # 효율적인 검색을 위한 핵심 자료구조 -- 각 term에 대해
+        # 어떤 문서에 포함되어 있고 얼마나 자주 나타나는지 미리 계산함. query 시점에
+        # query와 최소 하나의 term을 공유하는 문서만 scoring함.
         self.inverted_index: dict[str, list[tuple[int, int]]] = {}
         for doc_id, tokens in enumerate(self.doc_tokens):
             term_counts: dict[str, int] = {}
@@ -201,51 +201,51 @@ class BM25Index:
                     self.inverted_index[term] = []
                 self.inverted_index[term].append((doc_id, count))
 
-        # Precompute IDF scores for all terms
-        # IDF formula: log((N - df + 0.5) / (df + 0.5) + 1) where df = document frequency
-        # Why add 0.5? Smoothing to prevent division by zero and reduce impact of rare terms.
-        # Why the +1 outside? Ensures IDF is always positive (log(x) < 0 for x < 1).
+        # 모든 term의 IDF 점수를 미리 계산함
+        # IDF 수식: log((N - df + 0.5) / (df + 0.5) + 1), df = document frequency
+        # 왜 0.5를 더하나? 0으로 나누는 것을 방지하고 희귀 term의 영향을 줄이기 위한 smoothing임.
+        # 왜 바깥에 +1? IDF가 항상 양수가 되도록 보장함 (x < 1일 때 log(x) < 0).
         self.idf: dict[str, float] = {}
         for term, postings in self.inverted_index.items():
-            df = len(postings)  # document frequency = number of docs containing term
+            df = len(postings)  # document frequency = term을 포함하는 문서 수
             self.idf[term] = math.log((self.N - df + 0.5) / (df + 0.5) + 1)
 
     def score(self, query: str, doc_id: int) -> float:
-        """Compute BM25 score for a query against a specific document."""
+        """query에 대한 특정 문서의 BM25 점수를 계산함."""
         query_terms = tokenize(query)
         score = 0.0
 
-        dl = self.doc_lengths[doc_id]  # document length
-        # Document length normalization factor: penalizes long docs but not linearly
+        dl = self.doc_lengths[doc_id]  # 문서 길이
+        # 문서 길이 정규화 계수: 긴 문서에 페널티를 주되, 선형적이지는 않음
         norm = 1 - self.b + self.b * (dl / self.avgdl)
 
-        # Count term frequencies in document
+        # 문서 내 term 빈도를 계산함
         doc_term_counts: dict[str, int] = {}
         for term in self.doc_tokens[doc_id]:
             doc_term_counts[term] = doc_term_counts.get(term, 0) + 1
 
         for term in query_terms:
             if term not in self.idf:
-                continue  # term not in corpus, contributes 0 to score
+                continue  # 코퍼스에 없는 term이므로 점수에 기여하지 않음
             tf = doc_term_counts.get(term, 0)
             if tf == 0:
-                continue  # term not in this document
+                continue  # 이 문서에 없는 term임
 
-            # TF saturation: (tf * (k1 + 1)) / (tf + k1 * norm)
-            # As tf → ∞, this approaches (k1 + 1) / k1 ≈ 1.83 (for k1=1.2).
-            # This prevents term frequency from dominating the score.
+            # TF 포화: (tf * (k1 + 1)) / (tf + k1 * norm)
+            # tf → ∞일 때, 이 값은 (k1 + 1) / k1 ≈ 1.83 (k1=1.2일 때)에 수렴함.
+            # term frequency가 점수를 지배하는 것을 방지함.
             tf_score = (tf * (self.k1 + 1)) / (tf + self.k1 * norm)
             score += self.idf[term] * tf_score
 
         return score
 
     def retrieve(self, query: str, top_k: int = TOP_K) -> list[tuple[int, float]]:
-        """Retrieve top-k documents for a query, ranked by BM25 score.
+        """query에 대해 BM25 점수 기준 상위 k개 문서를 검색함.
 
-        Returns: list of (doc_id, score) tuples sorted by descending score.
+        Returns: 점수 내림차순으로 정렬된 (doc_id, score) 튜플 리스트.
         """
         scores = [(doc_id, self.score(query, doc_id)) for doc_id in range(self.N)]
-        # Sort by score descending, take top k
+        # 점수 내림차순 정렬 후 상위 k개 선택
         scores.sort(key=lambda x: x[1], reverse=True)
         return scores[:top_k]
 
@@ -253,37 +253,36 @@ class BM25Index:
 # === CHARACTER-LEVEL MLP GENERATOR ===
 
 def char_to_index(char: str) -> int:
-    """Map character to index in vocabulary."""
+    """문자를 vocabulary 내 인덱스로 매핑함."""
     if char in CHAR_VOCAB:
         return CHAR_VOCAB.index(char)
-    return CHAR_VOCAB.index(" ")  # fallback to space for unknown chars
-
+    return CHAR_VOCAB.index(" ")  # 알 수 없는 문자는 공백으로 fallback함
 
 def index_to_char(idx: int) -> str:
-    """Map index to character."""
+    """인덱스를 문자로 매핑함."""
     return CHAR_VOCAB[idx]
 
 
 def one_hot(idx: int, size: int) -> list[float]:
-    """Create one-hot encoded vector."""
+    """one-hot 인코딩된 벡터를 생성함."""
     vec = [0.0] * size
     vec[idx] = 1.0
     return vec
 
 
 class MLP:
-    """Character-level MLP generator with concatenated query + context input.
+    """query + context를 concat한 입력을 받는 character-level MLP generator.
 
     Architecture:
       input (query_chars + context_chars) → hidden (ReLU) → output (softmax over chars)
 
-    The key RAG mechanism: by concatenating retrieved context with the query, the MLP
-    can condition its predictions on retrieved facts. This is the minimum architecture
-    that meaningfully demonstrates RAG -- the model actually uses retrieved information
-    rather than just ignoring it.
+    핵심 RAG 메커니즘: 검색된 context를 query와 concat함으로써, MLP가
+    검색된 사실에 기반해 예측을 조건부로 수행할 수 있음. RAG를 의미 있게
+    보여주는 최소 아키텍처 -- 모델이 실제로 검색된 정보를 사용하며
+    무시하지 않음.
 
-    Signpost: production RAG uses transformer generators (GPT, LLaMA). We use an MLP
-    to keep the focus on the retrieval mechanism and context injection pattern.
+    Signpost: 프로덕션 RAG는 transformer generator(GPT, LLaMA)를 사용함. MLP를 사용하는 이유는
+    retrieval 메커니즘과 context 주입 패턴에 초점을 맞추기 위함임.
     """
 
     def __init__(self, input_dim: int, hidden_dim: int, output_dim: int):
@@ -291,9 +290,9 @@ class MLP:
         self.hidden_dim = hidden_dim
         self.output_dim = output_dim
 
-        # Xavier initialization: scale weights by 1/sqrt(fan_in) for stable gradients
-        # Why Xavier? Maintains variance of activations across layers, preventing
-        # gradients from vanishing or exploding early in training.
+        # Xavier initialization: 안정적인 gradient를 위해 weight를 1/sqrt(fan_in)으로 스케일링함
+        # 왜 Xavier인가? 레이어 간 activation의 분산을 유지해
+        # 학습 초기에 gradient가 vanishing하거나 exploding하는 것을 방지함.
         scale_1 = (2.0 / input_dim) ** 0.5
         scale_2 = (2.0 / hidden_dim) ** 0.5
 
@@ -308,7 +307,7 @@ class MLP:
     def forward(self, x: list[float]) -> tuple[list[float], dict]:
         """Forward pass: input → hidden (ReLU) → output (softmax).
 
-        Returns: (output_probs, cache) where cache stores intermediate values for backward.
+        Returns: (output_probs, cache), cache는 backward를 위한 중간값을 저장함.
         """
         # Hidden layer: h = ReLU(W1 @ x + b1)
         hidden = []
@@ -326,39 +325,39 @@ class MLP:
                 activation += self.W2[i][j] * hidden[j]
             logits.append(activation)
 
-        # Stable softmax: exp(x - max(x)) prevents overflow
-        # Without this, large logits cause exp() to overflow to inf, breaking gradients.
+        # Stable softmax: exp(x - max(x))로 overflow를 방지함
+        # 이것 없이는 큰 logit이 exp()를 inf로 overflow시켜 gradient가 깨짐.
         max_logit = max(logits)
         exp_logits = [math.exp(l - max_logit) for l in logits]
         sum_exp = sum(exp_logits)
         probs = [e / sum_exp for e in exp_logits]
 
-        # Cache for backward pass
+        # backward pass를 위한 cache
         cache = {"x": x, "hidden": hidden, "logits": logits, "probs": probs}
         return probs, cache
 
     def backward(
         self, target_idx: int, cache: dict, learning_rate: float
     ) -> float:
-        """Backward pass: compute gradients and update weights.
+        """Backward pass: gradient를 계산하고 weight를 업데이트함.
 
         Cross-entropy loss: L = -log(p[target_idx])
-        Gradient of cross-entropy + softmax has a clean form: dL/do_i = p_i - 1[i == target]
+        Cross-entropy + softmax의 gradient는 깔끔한 형태임: dL/do_i = p_i - 1[i == target]
 
-        Returns: loss value
+        Returns: loss 값
         """
         x = cache["x"]
         hidden = cache["hidden"]
         probs = cache["probs"]
 
-        # Clip probability to prevent log(0) = -inf
+        # log(0) = -inf를 방지하기 위해 확률을 clip함
         loss = -math.log(max(probs[target_idx], 1e-10))
 
-        # Gradient of loss w.r.t. output logits: p - y (where y is one-hot target)
+        # output logit에 대한 loss의 gradient: p - y (y는 one-hot target)
         dlogits = list(probs)
         dlogits[target_idx] -= 1.0
 
-        # Gradient w.r.t. W2 and b2
+        # W2와 b2에 대한 gradient
         dW2 = [[0.0] * self.hidden_dim for _ in range(self.output_dim)]
         db2 = [0.0] * self.output_dim
         for i in range(self.output_dim):
@@ -366,16 +365,16 @@ class MLP:
             for j in range(self.hidden_dim):
                 dW2[i][j] = dlogits[i] * hidden[j]
 
-        # Backprop through hidden layer
+        # hidden layer를 통한 backprop
         dhidden = [0.0] * self.hidden_dim
         for j in range(self.hidden_dim):
             for i in range(self.output_dim):
                 dhidden[j] += dlogits[i] * self.W2[i][j]
-            # ReLU gradient: 0 if hidden[j] <= 0, else pass through
+            # ReLU gradient: hidden[j] <= 0이면 0, 아니면 통과
             if hidden[j] <= 0:
                 dhidden[j] = 0.0
 
-        # Gradient w.r.t. W1 and b1
+        # W1과 b1에 대한 gradient
         dW1 = [[0.0] * self.input_dim for _ in range(self.hidden_dim)]
         db1 = [0.0] * self.hidden_dim
         for i in range(self.hidden_dim):
@@ -383,7 +382,7 @@ class MLP:
             for j in range(self.input_dim):
                 dW1[i][j] = dhidden[i] * x[j]
 
-        # Update weights with SGD: w = w - lr * dw
+        # SGD로 weight 업데이트: w = w - lr * dw
         for i in range(self.output_dim):
             self.b2[i] -= learning_rate * db2[i]
             for j in range(self.hidden_dim):
@@ -397,31 +396,31 @@ class MLP:
         return loss
 
     def generate(self, input_text: str, max_length: int = 50) -> str:
-        """Generate text character-by-character given an input context.
+        """입력 context가 주어지면 문자 단위로 텍스트를 생성함.
 
-        The input_text contains both the query and retrieved context (concatenated).
-        The model uses this full context to predict the next character at each step.
+        input_text는 query와 검색된 context를 concat한 것임.
+        모델은 이 전체 context를 사용해 각 단계에서 다음 문자를 예측함.
         """
-        # Start with input context as the seed
+        # 입력 context를 시작점으로 사용함
         current_text = input_text
         for _ in range(max_length):
-            # Encode recent context (last 100 chars to keep input size manageable)
+            # 최근 context를 인코딩함 (입력 크기를 관리 가능하도록 마지막 100자)
             context = current_text[-100:]
             x = []
             for char in context:
                 idx = char_to_index(char)
                 x.extend(one_hot(idx, VOCAB_SIZE))
-            # Pad to fixed input size if needed
+            # 필요하면 고정 입력 크기로 padding함
             while len(x) < self.input_dim:
                 x.append(0.0)
-            x = x[:self.input_dim]  # truncate if too long
+            x = x[:self.input_dim]  # 너무 길면 잘라냄
 
-            # Generate next character
+            # 다음 문자를 생성함
             probs, _ = self.forward(x)
             next_idx = probs.index(max(probs))  # greedy sampling
             next_char = index_to_char(next_idx)
 
-            # Stop at period (simple generation termination)
+            # 마침표에서 중단 (간단한 생성 종료)
             if next_char == ".":
                 current_text += next_char
                 break
@@ -439,16 +438,16 @@ def train_rag(
     num_epochs: int,
     learning_rate: float
 ):
-    """Train the MLP on (query, context, answer) triples from the knowledge base.
+    """knowledge base에서 추출한 (query, context, answer) 트리플로 MLP를 학습함.
 
-    Training process:
-    1. Sample a random document as ground truth
-    2. Extract a query from the document (first few words)
-    3. Retrieve context using BM25
-    4. Concatenate query + retrieved context
-    5. Train MLP to predict next character in the ground truth answer
+    학습 과정:
+    1. ground truth로 사용할 랜덤 문서를 샘플링함
+    2. 문서에서 query를 추출함 (처음 몇 단어)
+    3. BM25로 context를 검색함
+    4. query + 검색된 context를 concat함
+    5. ground truth 답변의 다음 문자를 예측하도록 MLP를 학습함
 
-    This teaches the model to use retrieved context to generate accurate completions.
+    검색된 context를 활용해 정확한 completion을 생성하는 법을 모델에 가르침.
     """
     print("Training RAG model...\n")
 
@@ -457,46 +456,46 @@ def train_rag(
         num_samples = 0
 
         for _ in range(BATCH_SIZE):
-            # Sample a random document as the ground truth
+            # ground truth로 사용할 랜덤 문서를 샘플링함
             doc_idx = random.randint(0, len(documents) - 1)
             doc = documents[doc_idx]
 
-            # Create a query from the first few words of the document
-            # This simulates a user asking about the topic in the document
+            # 문서의 처음 몇 단어로 query를 생성함
+            # 문서의 주제에 대해 사용자가 질문하는 것을 시뮬레이션함
             words = tokenize(doc)
             if len(words) < 3:
                 continue
             query_words = words[:min(3, len(words))]
             query = " ".join(query_words)
 
-            # Retrieve context using BM25
+            # BM25로 context를 검색함
             retrieved = bm25.retrieve(query, top_k=TOP_K)
             context = " ".join([documents[doc_id] for doc_id, _ in retrieved[:2]])
 
-            # Concatenate query + context as model input
-            # This is the core RAG mechanism: the model sees both the query and
-            # retrieved facts, enabling it to condition its predictions on external knowledge.
+            # query + context를 모델 입력으로 concat함
+            # 이것이 핵심 RAG 메커니즘: 모델이 query와 검색된 사실을 모두 보게 되어
+            # 외부 knowledge에 기반해 예측을 조건부로 수행할 수 있음.
             input_text = query + " " + context
 
-            # Target: the full ground truth document
-            # The model learns to complete from query+context to the full factual answer
+            # Target: 전체 ground truth 문서
+            # query+context에서 전체 factual 답변으로 completion하는 법을 학습함
             target = doc
 
-            # Train on each character in the target
-            for i in range(min(20, len(target))):  # limit to first 20 chars for speed
-                # Encode input context — use the LAST 100 chars (sliding window)
-                # so the model sees updated context as target chars are appended.
-                # This matches the inference-time behavior in generate().
+            # target의 각 문자에 대해 학습함
+            for i in range(min(20, len(target))):  # 속도를 위해 처음 20자로 제한함
+                # 입력 context를 인코딩함 — 마지막 100자를 사용 (sliding window)
+                # target 문자가 추가될 때 모델이 업데이트된 context를 보도록 함.
+                # generate()의 inference 시 동작과 일치함.
                 x = []
                 for char in input_text[-100:]:
                     idx = char_to_index(char)
                     x.extend(one_hot(idx, VOCAB_SIZE))
-                # Pad to fixed size
+                # 고정 크기로 padding함
                 while len(x) < mlp.input_dim:
                     x.append(0.0)
                 x = x[:mlp.input_dim]
 
-                # Target character
+                # target 문자
                 target_idx = char_to_index(target[i])
 
                 # Forward + backward
@@ -505,7 +504,7 @@ def train_rag(
                 epoch_loss += loss
                 num_samples += 1
 
-                # Update input_text to include predicted character
+                # 예측된 문자를 포함하도록 input_text를 업데이트함
                 input_text += target[i]
 
         avg_loss = epoch_loss / num_samples if num_samples > 0 else 0.0
@@ -523,19 +522,19 @@ def demo_retrieval_comparison(
     bm25: BM25Index,
     mlp: MLP
 ):
-    """Demonstrate generation WITH and WITHOUT retrieval for comparison.
+    """retrieval이 있을 때와 없을 때의 생성을 비교하여 보여줌.
 
-    This shows the core RAG value proposition: retrieved context improves generation
-    quality by providing factual grounding. Without retrieval, the model must rely
-    entirely on its parametric knowledge (learned weights), which is prone to
-    hallucination on factual queries.
+    RAG의 핵심 가치를 보여줌: 검색된 context가 factual grounding을 제공해
+    생성 품질을 개선함. retrieval 없이는 모델이 전적으로
+    parametric knowledge(학습된 weight)에 의존해야 하며, factual query에서
+    hallucination이 발생하기 쉬움.
     """
     print("=== RETRIEVAL COMPARISON ===\n")
 
     for query in queries:
         print(f"Query: '{query}'")
 
-        # WITH retrieval: BM25 → retrieve context → MLP generates
+        # WITH retrieval: BM25 → context 검색 → MLP가 생성함
         retrieved = bm25.retrieve(query, top_k=TOP_K)
         print(f"Retrieved docs (top {TOP_K}):")
         for doc_id, score in retrieved:
@@ -545,8 +544,8 @@ def demo_retrieval_comparison(
         input_with_context = query + " " + context
         generation_with = mlp.generate(input_with_context, max_length=40)
 
-        # WITHOUT retrieval: empty context → MLP generates
-        # The model receives only the query, no external facts to condition on
+        # WITHOUT retrieval: 빈 context → MLP가 생성함
+        # 모델이 query만 받고, 조건부 생성에 사용할 외부 사실이 없음
         input_without_context = query + " "
         generation_without = mlp.generate(input_without_context, max_length=40)
 
@@ -558,22 +557,22 @@ def demo_retrieval_comparison(
 # === MAIN ===
 
 if __name__ == "__main__":
-    # Generate synthetic knowledge base
+    # 합성 knowledge base 생성
     print("Generating synthetic knowledge base...")
     documents, test_queries = generate_knowledge_base()
     print(f"Created {len(documents)} documents\n")
 
-    # Build BM25 index
+    # BM25 인덱스 구축
     print("Building BM25 index...")
     bm25 = BM25Index(documents, k1=K1, b=B)
     print(f"Indexed {bm25.N} documents, {len(bm25.idf)} unique terms\n")
 
-    # Test retrieval accuracy on known queries.
-    # Since the knowledge base has multiple documents per topic (e.g., Paris appears
-    # in city paragraphs, population docs, and river docs), BM25 may return a more
-    # specific document about the same entity. We measure accuracy by checking whether
-    # the query's key terms appear in the retrieved document — this tests whether BM25
-    # finds relevant content, not whether it picks a specific document index.
+    # 알려진 query에 대한 retrieval 정확도를 테스트함.
+    # knowledge base에 주제별로 여러 문서가 있으므로 (예: Paris가 도시 문단,
+    # 인구 문서, 강 문서에 등장), BM25가 같은 엔티티에 대해 더 구체적인
+    # 문서를 반환할 수 있음. query의 핵심 term이 검색된 문서에 나타나는지로
+    # 정확도를 측정함 -- BM25가 특정 문서 인덱스를 고르는지가 아니라
+    # 관련 콘텐츠를 찾는지를 테스트함.
     print("=== RETRIEVAL ACCURACY TEST ===")
     correct = 0
     for query, expected_doc_idx in test_queries:
@@ -586,8 +585,8 @@ if __name__ == "__main__":
         retrieved_terms = set(tokenize(documents[retrieved_idx]))
         query_terms = set(tokenize(query))
 
-        # A retrieval is correct if the returned document contains ≥50% of query terms.
-        # This measures topical relevance: "seine river" → doc mentioning seine and river.
+        # 반환된 문서가 query term의 50% 이상을 포함하면 정답으로 판정함.
+        # 주제적 관련성을 측정함: "seine river" → seine과 river를 언급하는 문서.
         query_hits = sum(1 for t in query_terms if t in retrieved_terms)
         if query_hits >= max(len(query_terms) * 0.5, 1):
             correct += 1
@@ -599,10 +598,10 @@ if __name__ == "__main__":
     accuracy = 100 * correct / len(test_queries)
     print(f"Retrieval accuracy: {correct}/{len(test_queries)} = {accuracy:.1f}%\n")
 
-    # Initialize MLP generator
-    # Input dimension: concatenated query + context (each ~100 chars, one-hot encoded)
-    # We use a fixed input window to keep dimensions manageable
-    input_dim = 100 * VOCAB_SIZE  # 100 characters, one-hot encoded
+    # MLP generator 초기화
+    # 입력 차원: concat된 query + context (각 ~100자, one-hot 인코딩)
+    # 차원을 관리 가능하도록 고정 입력 window를 사용함
+    input_dim = 100 * VOCAB_SIZE  # 100자, one-hot 인코딩
     mlp = MLP(input_dim, HIDDEN_DIM, VOCAB_SIZE)
     print(f"Initialized MLP: {input_dim} -> {HIDDEN_DIM} -> {VOCAB_SIZE}")
     total_params = (
@@ -611,10 +610,10 @@ if __name__ == "__main__":
     )
     print(f"Total parameters: {total_params:,}\n")
 
-    # Train the RAG model
+    # RAG 모델 학습
     train_rag(documents, bm25, mlp, NUM_EPOCHS, LEARNING_RATE)
 
-    # Demo: compare generation with and without retrieval
+    # 데모: retrieval이 있을 때와 없을 때의 생성을 비교함
     demo_queries = [
         "population of paris",
         "seine river",

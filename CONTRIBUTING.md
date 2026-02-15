@@ -1,72 +1,72 @@
-# Contributing to no-magic
+# no-magic 기여 가이드
 
-Thank you for your interest in contributing. This document is long because the bar is high. Every script in this repository is read by people trying to understand an algorithm for the first time — your code is their teacher. Please read this fully before submitting.
+기여에 관심을 가져줘서 고마움. 이 문서가 긴 이유는 기준이 높기 때문임. 이 저장소의 모든 스크립트는 알고리즘을 처음 이해하려는 사람들이 읽는 것임 — 당신의 코드가 그들의 교사임. 제출 전에 반드시 전부 읽을 것.
 
 ---
 
-## The Non-Negotiable Constraints
+## 양보 불가 제약조건
 
-These are not guidelines. They are hard requirements. PRs that violate any of these will be closed without review.
+가이드라인이 아님. 하드 요구사항임. 이 중 하나라도 위반하는 PR은 리뷰 없이 닫힘.
 
-| Constraint | Rule |
+| 제약조건 | 규칙 |
 |---|---|
-| **One file** | Every script is a single `.py` file. No local imports, no `utils.py`, no companion files. |
-| **Zero dependencies** | Python standard library only. If it needs `pip install`, it doesn't belong here. Allowed modules: `os`, `math`, `random`, `json`, `struct`, `urllib`, `collections`, `itertools`, `functools`, `string`, `hashlib`, `time`. |
-| **Trains and infers** | Every script includes both the complete learning loop and inference/generation. The reader sees the full lifecycle. |
-| **Runs in minutes** | Under **7 minutes on M-series Mac** or **10 minutes on 2019-era Intel i5**. No GPU required. |
-| **Self-contained data** | Datasets are auto-downloaded on first run via `urllib` and cached locally. No manual download steps. Max 5MB. |
-| **Reproducible** | `random.seed(42)` at the top of every script. Same input, same output. |
-| **Commented** | Every script must follow the commenting standard described below. This is the single most common reason PRs are rejected. |
+| **단일 파일** | 모든 스크립트는 하나의 `.py` 파일임. 로컬 import 없음, `utils.py` 없음, 동반 파일 없음. |
+| **의존성 제로** | Python 표준 라이브러리만 사용. `pip install`이 필요하면 여기에 속하지 않음. 허용 모듈: `os`, `math`, `random`, `json`, `struct`, `urllib`, `collections`, `itertools`, `functools`, `string`, `hashlib`, `time`. |
+| **학습과 추론** | 모든 스크립트는 완전한 학습 루프와 추론/생성을 모두 포함함. 독자가 전체 라이프사이클을 볼 수 있어야 함. |
+| **수 분 내 실행** | **M시리즈 Mac에서 7분 미만** 또는 **2019년형 Intel i5에서 10분 미만**. GPU 불필요. |
+| **자체 포함 데이터** | 데이터셋은 첫 실행 시 `urllib`로 자동 다운로드되고 로컬에 캐싱됨. 수동 다운로드 단계 없음. 최대 5MB. |
+| **재현 가능** | 모든 스크립트 상단에 `random.seed(42)`. 같은 입력, 같은 출력. |
+| **주석 필수** | 모든 스크립트는 아래 설명된 주석 표준을 따라야 함. PR이 거절되는 가장 흔한 이유임. |
 
-**If your PR adds a `requirements.txt`, it will be closed.**
-
----
-
-## What We're Looking For
-
-### New Scripts
-
-We welcome new single-file implementations of algorithms that are widely used but poorly understood. Good candidates share these traits:
-
-- The algorithm powers a significant part of modern AI/ML infrastructure.
-- Most practitioners use it through library abstractions without understanding the internals.
-- It can be meaningfully demonstrated on a small dataset in under 10 minutes on CPU.
-- It doesn't already exist in the repository.
-
-Before writing a new script, open an issue describing the algorithm, what it teaches, and why it belongs here. This saves you from investing time in something that doesn't fit the collection.
-
-### Improvements to Existing Scripts
-
-We welcome PRs that improve existing scripts in the following ways:
-
-- **Better comments**: More clarity, better intuition, improved math-to-code mappings.
-- **Bug fixes**: Incorrect implementations, numerical instability, or reproducibility issues.
-- **Readability improvements**: Clearer variable names, better code structure, eliminating confusing patterns.
-- **Performance within constraints**: Making a script run faster without adding dependencies or sacrificing readability. Readability always wins over performance.
-
-### What We Don't Want
-
-- Scripts that wrap or call external libraries (even "lightweight" ones like NumPy).
-- "Improved" versions that add complexity without proportional clarity.
-- Refactors that extract shared utilities into common modules — each script stands alone.
-- Notebooks, blog posts, or documentation-only PRs (open an issue to discuss these).
-- Scripts that only demonstrate forward passes without training (with the documented exception of comparison scripts like `microattention.py`).
+**PR이 `requirements.txt`를 추가하면 닫힘.**
 
 ---
 
-## The Commenting Standard
+## 원하는 기여
 
-This is where most first-time contributors need to adjust. We are **not** optimizing for line count or code elegance. We are optimizing for a reader's understanding. A motivated engineer should be able to open your script and read it top-to-bottom — like a guided walkthrough — without needing a paper, textbook, or external reference.
+### 새 스크립트
 
-*Fewer lines is not a goal. Fewer moments of confusion is.*
+널리 사용되지만 제대로 이해되지 않는 알고리즘의 새로운 단일파일 구현을 환영함. 좋은 후보는 다음 특징을 공유함:
 
-### Required Comment Types
+- 현대 AI/ML 인프라의 상당 부분을 구동하는 알고리즘일 것.
+- 대부분의 실무자가 내부를 이해하지 못한 채 라이브러리 추상화를 통해 사용하고 있을 것.
+- CPU에서 10분 미만으로 작은 데이터셋에서 의미 있게 시연할 수 있을 것.
+- 저장소에 이미 존재하지 않을 것.
 
-Your script must include all of the following:
+새 스크립트를 작성하기 전에, 알고리즘이 무엇인지, 무엇을 가르치는지, 왜 여기에 속하는지 설명하는 이슈를 먼저 열 것. 컬렉션에 맞지 않는 것에 시간을 투자하는 것을 방지해줌.
 
-**1. File Thesis**
+### 기존 스크립트 개선
 
-The first line is a docstring stating what the script proves in one sentence. This is the script's reason for existing.
+다음과 같은 방식으로 기존 스크립트를 개선하는 PR을 환영함:
+
+- **더 나은 주석**: 더 명확한 설명, 더 나은 직관, 개선된 수학-코드 매핑.
+- **버그 수정**: 잘못된 구현, 수치 불안정성, 재현성 문제.
+- **가독성 개선**: 더 명확한 변수 이름, 더 나은 코드 구조, 혼란스러운 패턴 제거.
+- **제약조건 내 성능 개선**: 의존성 추가나 가독성 희생 없이 스크립트를 더 빠르게 만드는 것. 가독성이 항상 성능보다 우선임.
+
+### 원하지 않는 기여
+
+- 외부 라이브러리를 래핑하거나 호출하는 스크립트 (NumPy 같은 "가벼운" 것도 포함).
+- 비례적 명확성 없이 복잡성만 추가하는 "개선된" 버전.
+- 공유 유틸리티를 공통 모듈로 추출하는 리팩터링 — 각 스크립트는 독립적임.
+- 노트북, 블로그 포스트, 문서만 있는 PR (이런 것은 이슈를 열어 논의할 것).
+- 학습 없이 순전파만 시연하는 스크립트 (`microattention.py` 같은 비교 스크립트는 문서화된 예외임).
+
+---
+
+## 주석 표준
+
+대부분의 첫 기여자가 조정이 필요한 부분임. 줄 수나 코드 우아함을 최적화하는 것이 **아님**. 독자의 이해를 최적화하는 것임. 의욕 있는 엔지니어가 스크립트를 열고 위에서 아래로 읽을 수 있어야 함 — 가이드 투어처럼 — 논문, 교과서, 외부 참조 없이.
+
+*더 적은 줄이 목표가 아님. 더 적은 혼란의 순간이 목표임.*
+
+### 필수 주석 유형
+
+스크립트에 다음 모든 항목이 포함되어야 함:
+
+**1. 파일 테제**
+
+첫 줄은 스크립트가 한 문장으로 무엇을 증명하는지 기술하는 docstring임. 이것이 스크립트의 존재 이유임.
 
 ```python
 """
@@ -75,27 +75,27 @@ tokens, and decoding tokens back to text — in pure Python with zero dependenci
 """
 ```
 
-**2. Section Headers**
+**2. 섹션 헤더**
 
-Block comments separating major phases. A reader skimming only these headers should understand the script's structure without reading any code.
+주요 단계를 구분하는 블록 주석. 이 헤더만 훑어봐도 코드를 읽지 않고 스크립트의 구조를 이해할 수 있어야 함.
 
 ```python
 # === DATA LOADING ===
-# Fetch and prepare the training corpus.
+# 학습 코퍼스를 가져와서 준비.
 
 # === MODEL DEFINITION ===
-# Define the encoder and decoder networks.
+# 인코더와 디코더 네트워크를 정의.
 
 # === TRAINING LOOP ===
-# Train the model using Adam with linear LR decay.
+# 선형 LR 감소와 함께 Adam으로 모델을 학습.
 
 # === INFERENCE ===
-# Generate new samples from the trained model.
+# 학습된 모델에서 새로운 샘플을 생성.
 ```
 
-**3. "Why" Comments**
+**3. "왜" 주석**
 
-Explain the reasoning behind non-obvious decisions. The code shows *what* happens. Your comment explains *why* it happens this way and what would break or degrade if it were different.
+자명하지 않은 결정의 이유를 설명함. 코드는 *무엇이* 일어나는지 보여줌. 주석은 *왜* 이렇게 하는지, 다르게 했으면 무엇이 깨지거나 저하되는지 설명함.
 
 ```python
 # We use RMSNorm instead of LayerNorm: it drops the mean subtraction and learned
@@ -103,9 +103,9 @@ Explain the reasoning behind non-obvious decisions. The code shows *what* happen
 # have shown it works just as well.
 ```
 
-**4. Math-to-Code Mappings**
+**4. 수학-코드 매핑**
 
-Where the code implements a known equation, show the equation and map the variables explicitly. The reader should never have to guess which variable corresponds to which symbol in the paper.
+코드가 알려진 방정식을 구현하는 곳에서, 방정식을 보여주고 변수를 명시적으로 매핑함. 독자가 어떤 변수가 논문의 어떤 기호에 해당하는지 추측할 필요가 없어야 함.
 
 ```python
 # Reparameterization trick: z = μ + σ * ε, where ε ~ N(0,1)
@@ -115,9 +115,9 @@ epsilon = random.gauss(0, 1)
 z = mu + exp(0.5 * log_var) * epsilon
 ```
 
-**5. Intuition Comments**
+**5. 직관 주석**
 
-Brief explanations of *why* a technique works, not just how. These are the comments that save someone a trip to Wikipedia. If you understand something deeply enough to explain it in two sentences, that's worth more than a link to a paper.
+기법이 *왜* 작동하는지에 대한 간략한 설명. 어떻게가 아님. 위키피디아 한 번 안 가도 되게 해주는 주석임. 두 문장으로 설명할 수 있을 만큼 깊이 이해하고 있다면, 논문 링크보다 가치 있음.
 
 ```python
 # The update gate z_t acts as a "gradient highway": when z_t ≈ 1, the new hidden
@@ -126,9 +126,9 @@ Brief explanations of *why* a technique works, not just how. These are the comme
 # GRUs don't suffer from vanishing gradients the way vanilla RNNs do.
 ```
 
-**6. Signpost Comments**
+**6. 이정표 주석**
 
-Where the implementation makes a simplifying choice for pedagogical reasons, flag it and note what production systems do differently. This prevents readers from mistaking a toy pattern for a best practice.
+교육적 이유로 단순화한 선택을 한 곳에서, 그것을 표시하고 프로덕션 시스템이 어떻게 다르게 하는지 기록함. 독자가 교육용 패턴을 모범 사례로 오해하는 것을 방지함.
 
 ```python
 # In production, you'd use Generalized Advantage Estimation (GAE) here for lower
@@ -136,109 +136,109 @@ Where the implementation makes a simplifying choice for pedagogical reasons, fla
 # the GAE machinery obscuring it.
 ```
 
-**7. No Obvious Comments**
+**7. 자명한 주석 금지**
 
-If the code is self-explanatory, let it speak. Every comment must earn its place by adding information the code alone does not convey.
+코드가 자명하면 코드가 스스로 말하게 할 것. 모든 주석은 코드만으로는 전달하지 못하는 정보를 추가해서 자리를 정당화해야 함.
 
 ```python
-# BAD — restates the code
-x = x + 1  # increment x by 1
+# 나쁨 — 코드를 다시 말함
+x = x + 1  # x를 1 증가
 
-# BAD — restates the code with more words
-total = sum(losses)  # sum up all the losses
+# 나쁨 — 더 많은 단어로 코드를 다시 말함
+total = sum(losses)  # 모든 loss를 합산
 
-# GOOD — explains why
-total = sum(losses) / len(losses)  # average over sequence length, not sum, to make
-                                    # the loss scale-invariant to document length
+# 좋음 — 왜인지 설명함
+total = sum(losses) / len(losses)  # 합이 아니라 시퀀스 길이로 평균을 내서
+                                    # loss가 문서 길이에 무관하게 스케일 불변이 됨
 ```
 
-### Comment Density
+### 주석 밀도
 
-Target roughly 30-40% of lines as comments or blank lines. This is not a hard metric — dense math sections need more commentary, data loading boilerplate needs less. The actual test is subjective but strict: *could a motivated engineer with general ML knowledge read this file top-to-bottom in one sitting and understand the algorithm?*
-
----
-
-## Code Style
-
-### General Principles
-
-- **Readability over cleverness.** If a three-line explicit loop is clearer than a one-line comprehension, use the loop.
-- **Flat over nested.** Avoid deep nesting. Extract helper functions with descriptive names.
-- **Descriptive names.** Variables should be named for what they represent, not abbreviated for brevity. Use `learning_rate` not `lr`, `hidden_dim` not `hd`. Exceptions: conventional math notation (`x`, `z`, `mu`, `sigma`), loop indices (`i`, `j`, `t`), and universally understood abbreviations in ML (`embd`, `attn`, `mlp`).
-- **Functions describe what, not how.** Name functions for *what* they compute: `rmsnorm`, `softmax`, `linear`. Not `normalize_v2` or `process_data`.
-- **Consistent structure.** Follow the section ordering: imports → constants/hyperparameters → data loading → model definition → training loop → inference.
-
-### Formatting
-
-- Use 4-space indentation.
-- Maximum line length of 100 characters. Break long lines for readability.
-- One blank line between logical blocks within a function. Two blank lines between top-level definitions.
-- No trailing whitespace.
-- End the file with a single newline.
-
-### Python Practices
-
-- Use type hints in function signatures where they aid readability, but don't over-annotate obvious types.
-- Prefer `f-strings` for formatted output.
-- Use `random.seed(42)` at the top, before any randomness.
-- Avoid global mutable state where possible. If globals are necessary (as in `microgpt.py`'s `state_dict`), comment why.
-- No classes unless the algorithm fundamentally requires them (e.g., `Value` for autograd). Prefer functions and plain data structures.
+대략 30-40%의 줄이 주석이나 빈 줄이 되는 것을 목표로 함. 이것은 엄격한 지표가 아님 — 밀집된 수학 섹션은 더 많은 설명이 필요하고, 데이터 로딩 보일러플레이트는 덜 필요함. 실제 테스트는 주관적이지만 엄격함: *일반적인 ML 지식을 가진 의욕 있는 엔지니어가 이 파일을 한 번에 위에서 아래로 읽고 알고리즘을 이해할 수 있는가?*
 
 ---
 
-## Submitting a Pull Request
+## 코드 스타일
 
-### Before You Start
+### 일반 원칙
 
-1. **Check existing issues and the implementation plan.** The `implementation.md` file documents all scripts with detailed specs.
-2. **For new algorithm ideas**, open an issue first. Describe the algorithm, what it teaches, the dataset you'd use, and the expected line count. Wait for approval before writing code.
-3. **For improvements to existing scripts**, open an issue describing what you'd change and why. Small fixes (typos, numerical bugs) can go straight to a PR.
+- **영리함보다 가독성.** 3줄짜리 명시적 루프가 1줄짜리 컴프리헨션보다 명확하면, 루프를 사용할 것.
+- **중첩보다 평탄.** 깊은 중첩을 피할 것. 서술적 이름의 헬퍼 함수로 추출할 것.
+- **서술적 이름.** 변수는 나타내는 것의 이름을 따서 명명하고, 간결함을 위해 축약하지 말 것. `lr`이 아니라 `learning_rate`, `hd`가 아니라 `hidden_dim`을 사용할 것. 예외: 관례적 수학 표기(`x`, `z`, `mu`, `sigma`), 루프 인덱스(`i`, `j`, `t`), ML에서 보편적으로 이해되는 약어(`embd`, `attn`, `mlp`).
+- **함수는 무엇을 서술하고, 어떻게가 아님.** 함수 이름은 *무엇을* 계산하는지를 따서 명명할 것: `rmsnorm`, `softmax`, `linear`. `normalize_v2`나 `process_data`가 아님.
+- **일관된 구조.** 섹션 순서를 따를 것: imports → 상수/하이퍼파라미터 → 데이터 로딩 → 모델 정의 → 학습 루프 → 추론.
 
-### Writing the Script
+### 포맷팅
 
-1. Start from the spec in `implementation.md` if one exists for your algorithm.
-2. Write the complete script in a single file.
-3. Run it end-to-end on your machine. Verify it completes in under 10 minutes.
-4. Run it again with a fresh directory (delete any cached data files) to verify the auto-download works.
-5. Review your own comments against the commenting standard above. Be honest — would *you* understand this code if you were seeing the algorithm for the first time?
+- 4칸 들여쓰기 사용.
+- 최대 줄 길이 100자. 긴 줄은 가독성을 위해 분리할 것.
+- 함수 내 논리적 블록 사이에 빈 줄 하나. 최상위 정의 사이에 빈 줄 둘.
+- 후행 공백 없음.
+- 파일 끝에 개행 하나.
 
-### PR Requirements
+### Python 관행
 
-Your pull request must include:
-
-- **The script file** placed in the correct tier directory (`01-foundations/`, `02-alignment/`, or `03-systems/`).
-- **A PR description** that includes:
-  - The algorithm name and a one-sentence summary.
-  - The dataset used and how it's fetched.
-  - The total line count and approximate comment density.
-  - The runtime on your machine (CPU model + time).
-  - Sample output (copy-paste a few lines of training progress and inference results).
-
-Your pull request must **not** include:
-
-- Changes to other scripts (unless fixing a cross-cutting bug).
-- New directories outside the established structure.
-- Any file other than the single `.py` script (no READMEs per script, no notebooks, no test files).
-- Changes to `CONTRIBUTING.md` (open an issue to discuss these).
-
-### Review Process
-
-1. **Automated checks**: The script must run with `python script.py` and exit cleanly. No arguments, no environment variables, no manual setup.
-2. **Constraint verification**: One file, zero dependencies, under 10 minutes, reproducible output.
-3. **Commenting review**: This is the most thorough part of review. Expect feedback on comment quality, missing intuition explanations, and unclear math mappings. This is not nitpicking — it's the core quality bar of the project.
-4. **Correctness review**: The algorithm must be implemented correctly. Simplified, yes. Wrong, no. If your implementation deviates from the standard algorithm, the deviation must be commented with a signpost explaining why.
-5. **Readability review**: The "one sitting" test. A reviewer will read your script top-to-bottom and note every point where they had to stop and think. If there are too many, you'll be asked to add comments or restructure.
-
-Expect at least one round of revision. This is normal and not a reflection of code quality — it's the nature of writing for an educational audience.
+- 함수 시그니처에서 가독성에 도움이 되는 경우 type hint를 사용하되, 자명한 타입을 과도하게 어노테이션하지 말 것.
+- 포맷된 출력에는 `f-string`을 선호할 것.
+- 어떤 랜덤성보다 앞서, 상단에 `random.seed(42)`를 사용할 것.
+- 가능하면 전역 가변 상태를 피할 것. 전역이 필요한 경우(`microgpt.py`의 `state_dict`처럼), 왜인지 주석을 달 것.
+- 알고리즘이 근본적으로 요구하지 않는 한 클래스를 사용하지 말 것 (예: autograd를 위한 `Value`). 함수와 일반 데이터 구조를 선호할 것.
 
 ---
 
-## Attribution and Licensing
+## Pull Request 제출
 
-- All contributions are made under the MIT license.
-- If your script is inspired by a specific paper, blog post, or existing implementation, cite it in a comment at the top of the file, immediately after the thesis docstring.
-- Do not copy code from other repositories, even MIT-licensed ones. Write your own implementation. You may reference other implementations for correctness verification, but the code must be original.
-- If your script covers similar ground to Karpathy's work (micrograd, makemore, microgpt), ensure it provides distinct pedagogical value rather than replicating what already exists. See `implementation.md` for how we handle this.
+### 시작 전
+
+1. **기존 이슈와 구현 계획을 확인할 것.** `implementation.md` 파일이 모든 스크립트를 상세한 스펙과 함께 문서화하고 있음.
+2. **새 알고리즘 아이디어의 경우**, 먼저 이슈를 열 것. 알고리즘, 무엇을 가르치는지, 사용할 데이터셋, 예상 줄 수를 설명할 것. 코드 작성 전에 승인을 기다릴 것.
+3. **기존 스크립트 개선의 경우**, 무엇을 왜 변경하는지 설명하는 이슈를 열 것. 작은 수정(오타, 수치 버그)은 바로 PR로 가도 됨.
+
+### 스크립트 작성
+
+1. 알고리즘에 대한 스펙이 `implementation.md`에 있으면 거기서 시작할 것.
+2. 단일 파일로 완전한 스크립트를 작성할 것.
+3. 자기 머신에서 처음부터 끝까지 실행할 것. 10분 미만으로 완료되는지 확인할 것.
+4. 새 디렉토리에서 다시 실행할 것 (캐싱된 데이터 파일 삭제) 자동 다운로드가 작동하는지 확인할 것.
+5. 위의 주석 표준과 비교하여 자기 주석을 검토할 것. 솔직하게 — 알고리즘을 처음 보는 사람이 *본인이라면* 이 코드를 이해할 수 있겠는가?
+
+### PR 요구사항
+
+Pull request에 포함해야 하는 것:
+
+- 올바른 티어 디렉토리에 배치된 **스크립트 파일** (`01-foundations/`, `02-alignment/`, 또는 `03-systems/`).
+- 다음을 포함하는 **PR 설명**:
+  - 알고리즘 이름과 한 문장 요약.
+  - 사용한 데이터셋과 가져오는 방법.
+  - 총 줄 수와 대략적인 주석 밀도.
+  - 자기 머신에서의 실행 시간 (CPU 모델 + 시간).
+  - 샘플 출력 (학습 진행 상황과 추론 결과 몇 줄을 복사-붙여넣기).
+
+Pull request에 포함하지 **않아야** 하는 것:
+
+- 다른 스크립트의 변경 (교차 버그 수정이 아닌 한).
+- 확립된 구조 밖의 새 디렉토리.
+- 단일 `.py` 스크립트 외의 모든 파일 (스크립트별 README 없음, 노트북 없음, 테스트 파일 없음).
+- `CONTRIBUTING.md` 변경 (이것은 이슈를 열어 논의할 것).
+
+### 리뷰 프로세스
+
+1. **자동 검사**: 스크립트가 `python script.py`로 실행되고 깨끗하게 종료되어야 함. 인자 없음, 환경 변수 없음, 수동 설정 없음.
+2. **제약조건 검증**: 단일 파일, 의존성 제로, 10분 미만, 재현 가능한 출력.
+3. **주석 리뷰**: 리뷰에서 가장 철저한 부분임. 주석 품질, 누락된 직관 설명, 불명확한 수학 매핑에 대한 피드백을 예상할 것. 트집 잡기가 아님 — 프로젝트의 핵심 품질 기준임.
+4. **정확성 리뷰**: 알고리즘이 올바르게 구현되어야 함. 단순화는 됨. 틀리면 안 됨. 구현이 표준 알고리즘에서 벗어나면, 벗어난 이유를 설명하는 이정표 주석이 있어야 함.
+5. **가독성 리뷰**: "한 번에 읽기" 테스트. 리뷰어가 스크립트를 위에서 아래로 읽으며 멈춰서 생각해야 했던 모든 지점을 기록함. 너무 많으면 주석을 추가하거나 구조를 변경하도록 요청받게 됨.
+
+최소 한 차례 수정을 예상할 것. 이것은 정상이며 코드 품질의 반영이 아님 — 교육적 독자를 위해 작성하는 것의 본질임.
+
+---
+
+## 저작자 표시와 라이선스
+
+- 모든 기여는 MIT 라이선스 하에 이루어짐.
+- 스크립트가 특정 논문, 블로그 포스트, 기존 구현에서 영감을 받았다면, 파일 상단의 테제 docstring 바로 뒤에 주석으로 인용할 것.
+- 다른 저장소에서 코드를 복사하지 말 것, MIT 라이선스여도. 직접 구현을 작성할 것. 정확성 검증을 위해 다른 구현을 참조할 수 있지만, 코드는 원본이어야 함.
+- 스크립트가 Karpathy의 작업(micrograd, makemore, microgpt)과 유사한 영역을 다루는 경우, 이미 존재하는 것을 복제하는 것이 아니라 차별화된 교육적 가치를 제공하는지 확인할 것. 이를 어떻게 처리하는지는 `implementation.md`를 참조할 것.
 
 ```python
 """
@@ -252,58 +252,58 @@ without a separate reward model — in pure Python with zero dependencies.
 
 ---
 
-## Code of Conduct
+## 행동 강령
 
-- Be respectful in issues and reviews.
-- Assume good intent. Contributors come from different backgrounds and experience levels.
-- Critique code and comments, not people.
-- If you disagree with a review decision, explain your reasoning. If the maintainer still disagrees, accept the decision gracefully.
-
----
-
-## Quick Reference Checklist
-
-Before submitting, verify every item:
-
-**Execution**
-- [ ] `python script.py` runs with zero arguments and exits cleanly
-- [ ] No imports outside Python standard library
-- [ ] `random.seed(42)` at the top
-- [ ] Completes in under 7 minutes on M-series Mac (or 10 minutes on 2019 Intel i5)
-- [ ] Prints training progress (step number, loss)
-- [ ] Prints inference results demonstrating the trained model
-- [ ] Meets the success criteria defined in `docs/implementation.md` for this script
-
-**Autograd & Numerical Stability** (for scripts using scalar autograd)
-- [ ] `Value` class implements the canonical interface from `docs/autograd-interface.md`
-- [ ] Autograd callout block present after Value class (documents per-script differences)
-- [ ] Stable softmax: `exp(x - max(x))` pattern with explanatory comment
-- [ ] Clipped log-probabilities: `max(p, 1e-10)` before `log()` with comment
-- [ ] Adam epsilon: `1e-8` in denominator with comment
-- [ ] Test vectors pass (from `docs/autograd-interface.md`)
-
-**Commenting (non-negotiable)**
-- [ ] File opens with a one-sentence thesis docstring
-- [ ] Section headers (`# === SECTION ===`) separate major phases
-- [ ] Every non-obvious block has a "why" comment
-- [ ] Key equations have math-to-code mapping comments
-- [ ] At least one intuition comment per core algorithmic concept
-- [ ] Simplifying choices flagged with signpost comments
-- [ ] No obvious or redundant comments
-- [ ] Comment density approximately 30-40%
-
-**Readability**
-- [ ] Passes the "one sitting" test
-- [ ] Variable names are descriptive and consistent
-- [ ] Functions named for what they compute
-- [ ] No unnecessary complexity or cleverness
-
-**Logistics**
-- [ ] File placed in correct tier directory (`01-foundations/`, `02-alignment/`, or `03-systems/`)
-- [ ] PR description includes runtime, line count, and sample output
-- [ ] No extra files included
-- [ ] Attribution comments for any referenced papers or implementations
+- 이슈와 리뷰에서 존중할 것.
+- 선의를 가정할 것. 기여자들은 서로 다른 배경과 경험 수준에서 옴.
+- 사람이 아니라 코드와 주석을 비판할 것.
+- 리뷰 결정에 동의하지 않으면 자기 논리를 설명할 것. 메인테이너가 여전히 동의하지 않으면 결정을 품위 있게 수용할 것.
 
 ---
 
-*The constraint is the product. The comments are the curriculum. Thank you for helping build it.*
+## 빠른 참조 체크리스트
+
+제출 전에 모든 항목을 확인할 것:
+
+**실행**
+- [ ] `python script.py`가 인자 없이 실행되고 깨끗하게 종료됨
+- [ ] Python 표준 라이브러리 외 import 없음
+- [ ] 상단에 `random.seed(42)`
+- [ ] M시리즈 Mac에서 7분 미만으로 완료됨 (또는 2019 Intel i5에서 10분 미만)
+- [ ] 학습 진행 상황 출력 (step 번호, loss)
+- [ ] 학습된 모델을 보여주는 추론 결과 출력
+- [ ] `docs/implementation.md`에 정의된 이 스크립트의 성공 기준을 충족함
+
+**Autograd & 수치 안정성** (scalar autograd를 사용하는 스크립트용)
+- [ ] `Value` class가 `docs/autograd-interface.md`의 표준 인터페이스를 구현함
+- [ ] Value class 뒤에 autograd 설명 블록이 있음 (스크립트별 차이점을 문서화)
+- [ ] 안정적 softmax: 설명 주석과 함께 `exp(x - max(x))` 패턴 사용
+- [ ] 클리핑된 log 확률: 주석과 함께 `log()` 전에 `max(p, 1e-10)` 사용
+- [ ] Adam epsilon: 주석과 함께 분모에 `1e-8` 사용
+- [ ] 테스트 벡터 통과 (`docs/autograd-interface.md`에서)
+
+**주석 (양보 불가)**
+- [ ] 파일이 한 문장 테제 docstring으로 시작함
+- [ ] 섹션 헤더(`# === SECTION ===`)가 주요 단계를 구분함
+- [ ] 모든 자명하지 않은 블록에 "왜" 주석이 있음
+- [ ] 핵심 방정식에 수학-코드 매핑 주석이 있음
+- [ ] 핵심 알고리즘 개념마다 최소 하나의 직관 주석이 있음
+- [ ] 단순화한 선택에 이정표 주석이 표시됨
+- [ ] 자명하거나 중복된 주석 없음
+- [ ] 주석 밀도 약 30-40%
+
+**가독성**
+- [ ] "한 번에 읽기" 테스트 통과
+- [ ] 변수 이름이 서술적이고 일관적임
+- [ ] 함수가 계산하는 것을 따서 명명됨
+- [ ] 불필요한 복잡성이나 영리함 없음
+
+**기타**
+- [ ] 파일이 올바른 티어 디렉토리에 배치됨 (`01-foundations/`, `02-alignment/`, 또는 `03-systems/`)
+- [ ] PR 설명에 실행 시간, 줄 수, 샘플 출력이 포함됨
+- [ ] 추가 파일 포함 없음
+- [ ] 참조된 논문이나 구현에 대한 저작자 표시 주석
+
+---
+
+*제약이 곧 제품임. 주석이 곧 커리큘럼임. 함께 만들어줘서 고마움.*

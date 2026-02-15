@@ -1,11 +1,11 @@
 """
-How to learn a compressed, generative representation of data — the reparameterization
-trick demystified, in pure Python with zero dependencies.
+데이터의 압축된 생성적 표현을 학습하는 방법 — reparameterization trick의 이해,
+외부 의존성 없이 순수 Python으로 구현함.
 """
 # Reference: Kingma & Welling, "Auto-Encoding Variational Bayes" (2013).
 # https://arxiv.org/abs/1312.6114
-# The reparameterization trick (z = μ + σ * ε) is the core contribution that makes
-# VAEs trainable — before this, sampling operations blocked gradient flow.
+# reparameterization trick (z = μ + σ * ε)은 VAE를 학습 가능하게 만든 핵심 기여임
+# — 이전에는 sampling 연산이 gradient 흐름을 차단했음.
 
 from __future__ import annotations
 
@@ -17,40 +17,39 @@ random.seed(42)
 
 # === CONSTANTS ===
 
-LATENT_DIM = 2          # Size of latent space z. 2D for easy interpretation.
-HIDDEN_DIM = 16         # Hidden layer size for encoder and decoder MLPs.
+LATENT_DIM = 2          # latent space z의 크기. 쉬운 해석을 위해 2D임.
+HIDDEN_DIM = 16         # encoder와 decoder MLP의 hidden layer 크기.
 LEARNING_RATE = 0.001   # Adam learning rate.
-BETA = 1.0              # KL weight in ELBO. β=1 is standard VAE, β>1 encourages disentanglement.
-NUM_EPOCHS = 1000       # Training iterations.
-BATCH_SIZE = 16         # Minibatch size for stochastic gradient descent.
+BETA = 1.0              # ELBO에서 KL 가중치. β=1은 표준 VAE, β>1은 disentanglement를 촉진함.
+NUM_EPOCHS = 1000       # 학습 iteration.
+BATCH_SIZE = 16         # stochastic gradient descent를 위한 minibatch 크기.
 
-# Signpost: production VAEs use convolutional encoders/decoders for images. This MLP on
-# 2D data demonstrates the same principles (ELBO, reparameterization, latent interpolation)
-# at 1% of the complexity. The algorithm is identical — only the encoder/decoder architecture
-# changes when scaling to pixels.
+# Signpost: 프로덕션 VAE는 이미지에 convolutional encoder/decoder를 사용함. 이 2D 데이터
+# MLP는 복잡성 1%로 동일한 원리(ELBO, reparameterization, latent interpolation)를
+# 보여줌. 알고리즘은 동일하며 -- 픽셀로 확장할 때 encoder/decoder 아키텍처만 변경됨.
 
 
 # === SYNTHETIC DATA GENERATION ===
 
 def generate_data(n_points: int = 800) -> list[list[float]]:
-    """Generate a mixture of 2D Gaussians for training.
+    """학습용 2D Gaussian mixture를 생성함.
 
-    We create 4 clusters at different positions so the VAE has interesting structure
-    to learn. A single Gaussian would be trivial (the VAE would learn the mean/variance
-    directly). Multiple modes force the latent space to organize meaningfully.
+    VAE가 학습할 흥미로운 구조를 갖도록 서로 다른 위치에 4개의 cluster를 만듦.
+    단일 Gaussian이면 자명한 문제가 됨 (VAE가 평균/분산을 직접 학습할 수 있음).
+    여러 mode가 latent space를 의미 있게 구성하도록 강제함.
     """
-    # Four cluster centers in 2D space, arranged in a rough square.
+    # 2D 공간에서 대략 정사각형으로 배치된 4개의 cluster 중심.
     centers = [
         [-2.0, -2.0],
         [-2.0, 2.0],
         [2.0, -2.0],
         [2.0, 2.0],
     ]
-    variance = 0.3  # Small variance so clusters are distinct but not separated.
+    variance = 0.3  # cluster가 구분되지만 분리되지는 않을 정도의 작은 분산.
 
     data = []
     for _ in range(n_points):
-        # Randomly select a cluster, then sample from N(center, variance).
+        # cluster를 랜덤으로 선택한 뒤, N(center, variance)에서 샘플링함.
         center = random.choice(centers)
         x = random.gauss(center[0], math.sqrt(variance))
         y = random.gauss(center[1], math.sqrt(variance))
@@ -60,12 +59,12 @@ def generate_data(n_points: int = 800) -> list[list[float]]:
 
 
 # === MLP UTILITIES ===
-# We use plain float arrays (not the Value autograd class) because VAE training with
-# scalar autograd hits the 7-minute runtime limit. Manual gradient computation keeps
-# the core VAE algorithm visible while meeting runtime constraints.
+# plain float 배열을 사용함 (Value autograd 클래스가 아님). scalar autograd로 VAE를
+# 학습하면 7분 실행 시간 제한에 걸리기 때문임. 수동 gradient 계산으로 핵심 VAE 알고리즘을
+# 보이면서 실행 시간 제약을 충족함.
 
 def matrix_multiply(a: list[list[float]], b: list[float]) -> list[float]:
-    """Multiply matrix a (m×n) by vector b (n,) to get vector (m,)."""
+    """행렬 a (m×n)와 벡터 b (n,)를 곱해 벡터 (m,)를 반환함."""
     return [sum(a[i][j] * b[j] for j in range(len(b))) for i in range(len(a))]
 
 
@@ -75,27 +74,27 @@ def relu(x: list[float]) -> list[float]:
 
 
 def relu_grad(x: list[float]) -> list[float]:
-    """Gradient of ReLU: 1 if x > 0, else 0."""
+    """ReLU의 gradient: x > 0이면 1, 아니면 0."""
     return [1.0 if val > 0 else 0.0 for val in x]
 
 
 def add_bias(x: list[float], b: list[float]) -> list[float]:
-    """Add bias vector b to x element-wise."""
+    """bias 벡터 b를 x에 element-wise로 더함."""
     return [x[i] + b[i] for i in range(len(x))]
 
 
 def init_weights(rows: int, cols: int) -> list[list[float]]:
-    """Initialize weights using Xavier/Glorot initialization.
+    """Xavier/Glorot initialization으로 weight를 초기화함.
 
-    Scale by sqrt(2 / (rows + cols)) for stable gradients. Without this,
-    deep networks suffer from vanishing/exploding activations.
+    sqrt(2 / (rows + cols))로 스케일링해 안정적인 gradient를 유지함. 이것 없이는
+    deep network에서 activation이 vanishing/exploding함.
     """
     scale = math.sqrt(2.0 / (rows + cols))
     return [[random.gauss(0, scale) for _ in range(cols)] for _ in range(rows)]
 
 
 def init_bias(size: int) -> list[float]:
-    """Initialize bias to zeros (standard practice)."""
+    """bias를 0으로 초기화함 (표준 관례)."""
     return [0.0 for _ in range(size)]
 
 
@@ -110,72 +109,72 @@ def encoder_forward(
     w_logvar: list[list[float]],
     b_logvar: list[float],
 ) -> tuple[list[float], list[float], list[float]]:
-    """Encoder: input (2D) → hidden (ReLU) → (mean, log_var) in latent space.
+    """Encoder: input (2D) → hidden (ReLU) → latent space의 (mean, log_var).
 
-    Why two output heads (mean and log_var)? The encoder parameterizes the approximate
-    posterior q(z|x) as a Gaussian. Instead of directly outputting variance σ²,
-    we output log(σ²) because:
-    - Variance must be positive, but the network output is unconstrained
-    - Optimizing log_var avoids numerical issues (exp is always positive)
-    - Standard parameterization in variational inference
+    왜 두 개의 출력 head(mean과 log_var)인가? encoder가 approximate posterior
+    q(z|x)를 Gaussian으로 파라미터화하기 때문임. 분산 σ²를 직접 출력하지 않고
+    log(σ²)를 출력하는 이유:
+    - 분산은 양수여야 하지만 네트워크 출력은 제약이 없음
+    - log_var를 최적화하면 수치적 문제를 피할 수 있음 (exp는 항상 양수)
+    - variational inference의 표준 파라미터화임
 
-    Returns: (hidden_state, mean, log_var) where mean and log_var both have shape (latent_dim,)
+    Returns: (hidden_state, mean, log_var), mean과 log_var 모두 (latent_dim,) 형태임
     """
-    # Input → hidden layer with ReLU activation
+    # Input → ReLU activation이 있는 hidden layer
     hidden = relu(add_bias(matrix_multiply(w1, x), b1))
 
-    # Hidden → mean of latent distribution (unconstrained)
+    # Hidden → latent 분포의 mean (제약 없음)
     mean = add_bias(matrix_multiply(w_mean, hidden), b_mean)
 
-    # Hidden → log variance of latent distribution (unconstrained)
-    # We'll exponentiate this when computing the reparameterization trick, so
-    # log_var can be any real number, and exp(0.5 * log_var) = σ will be positive.
+    # Hidden → latent 분포의 log variance (제약 없음)
+    # reparameterization trick 계산 시 이것을 exponentiate하므로,
+    # log_var는 어떤 실수든 가능하며, exp(0.5 * log_var) = σ는 양수가 됨.
     log_var = add_bias(matrix_multiply(w_logvar, hidden), b_logvar)
 
     return hidden, mean, log_var
 
 
 # === REPARAMETERIZATION TRICK ===
-# This is the core pedagogical point of the script. Everything else is machinery;
-# this single function is what makes VAEs trainable.
+# 이 스크립트의 핵심 교육 포인트. 나머지는 모두 기반 구조이며,
+# 이 하나의 함수가 VAE를 학습 가능하게 만드는 것임.
 
 def reparameterize(mean: list[float], log_var: list[float]) -> list[float]:
-    """Sample z from q(z|x) via the reparameterization trick.
+    """reparameterization trick을 통해 q(z|x)에서 z를 샘플링함.
 
-    THE CORE INSIGHT — why this works:
+    핵심 통찰 — 왜 이것이 동작하는가:
 
-    We want to sample z ~ N(μ, σ²) where μ = encoder_mean(x) and σ² = exp(encoder_log_var(x)).
-    Naively, we'd write:
+    z ~ N(μ, σ²)를 샘플링하려 함. μ = encoder_mean(x), σ² = exp(encoder_log_var(x)).
+    단순하게 하면:
         z = random.gauss(mean, sigma)
 
-    But this breaks gradient flow. The randomness blocks backpropagation — gradients
-    can't flow through a sampling operation because the derivative of "sample a random
-    number" is undefined.
+    하지만 이렇게 하면 gradient 흐름이 끊김. 랜덤성이 backpropagation을 차단함 —
+    "랜덤 수를 샘플링"하는 연산의 미분이 정의되지 않기 때문에
+    gradient가 sampling 연산을 통과할 수 없음.
 
-    The reparameterization trick solves this:
-        ε ~ N(0,1)           # sample from standard normal (no parameters)
-        σ = exp(0.5 * log_var)    # deterministic function of log_var
-        z = μ + σ * ε        # deterministic function of μ, log_var, and external ε
+    reparameterization trick이 이를 해결함:
+        ε ~ N(0,1)           # 표준 정규분포에서 샘플링 (파라미터 없음)
+        σ = exp(0.5 * log_var)    # log_var의 결정적 함수
+        z = μ + σ * ε        # μ, log_var, 외부 ε의 결정적 함수
 
-    Now the randomness (ε) is external to the computation graph. Gradients flow through
-    μ and log_var (which are deterministic network outputs), but not through ε. This
-    makes the sampling operation differentiable.
+    이제 랜덤성(ε)이 computation graph 외부에 있음. gradient가
+    μ와 log_var(결정적 네트워크 출력)를 통해 흐르지만, ε을 통해서는 흐르지 않음.
+    이것이 sampling 연산을 미분 가능하게 만듦.
 
     Math-to-code mapping:
-        μ: mean (encoder output)
-        log(σ²): log_var (encoder output)
+        μ: mean (encoder 출력)
+        log(σ²): log_var (encoder 출력)
         σ: exp(0.5 * log_var)
-        ε: epsilon (sampled externally)
+        ε: epsilon (외부에서 샘플링됨)
         z: mean + sigma * epsilon
 
-    Before Kingma & Welling (2013), people used REINFORCE-style gradient estimators
-    which have much higher variance and require many more samples. The reparameterization
-    trick is what made VAEs practical.
+    Kingma & Welling (2013) 이전에는 REINFORCE 스타일 gradient estimator를 사용했는데
+    분산이 훨씬 높아 더 많은 sample이 필요했음. reparameterization trick이
+    VAE를 실용적으로 만든 것임.
     """
     epsilon = [random.gauss(0, 1) for _ in range(len(mean))]
 
-    # σ = exp(0.5 * log_var). We use 0.5 * log_var instead of log_var because
-    # log_var = log(σ²), so 0.5 * log_var = log(σ).
+    # σ = exp(0.5 * log_var). log_var = log(σ²)이므로
+    # 0.5 * log_var = log(σ)이기 때문에 0.5 * log_var를 사용함.
     sigma = [math.exp(0.5 * lv) for lv in log_var]
 
     # z = μ + σ * ε
@@ -193,15 +192,15 @@ def decoder_forward(
     w2: list[list[float]],
     b2: list[float],
 ) -> tuple[list[float], list[float]]:
-    """Decoder: latent z → hidden (ReLU) → reconstructed output (2D).
+    """Decoder: latent z → hidden (ReLU) → 복원된 output (2D).
 
-    Returns: (hidden_state, output) where output is the reconstructed 2D point.
+    Returns: (hidden_state, output), output은 복원된 2D 포인트임.
     """
-    # Latent → hidden layer with ReLU activation
+    # Latent → ReLU activation이 있는 hidden layer
     hidden = relu(add_bias(matrix_multiply(w1, z), b1))
 
-    # Hidden → output (2D reconstructed point, no activation)
-    # We don't apply an activation because the data is unconstrained (can be negative).
+    # Hidden → output (2D 복원 포인트, activation 없음)
+    # 데이터가 제약 없으므로 (음수일 수 있음) activation을 적용하지 않음.
     output = add_bias(matrix_multiply(w2, hidden), b2)
 
     return hidden, output
@@ -216,35 +215,35 @@ def compute_loss(
     x_recon: list[float],
     beta: float,
 ) -> tuple[float, float, float]:
-    """Compute the Evidence Lower Bound (ELBO) loss.
+    """Evidence Lower Bound (ELBO) loss를 계산함.
 
     ELBO = reconstruction_loss + β * KL_divergence
 
-    WHY THIS LOSS FUNCTION:
-    VAEs maximize the log-likelihood log p(x) of the data. We can't compute this directly,
-    so we maximize a lower bound (ELBO) instead. Maximizing ELBO ≈ maximizing log p(x).
+    왜 이 loss 함수인가:
+    VAE는 데이터의 log-likelihood log p(x)를 최대화함. 이를 직접 계산할 수 없으므로
+    대신 하한(ELBO)을 최대화함. ELBO 최대화 ≈ log p(x) 최대화.
 
-    The ELBO decomposes into two terms:
-    1. Reconstruction loss: how well the decoder reconstructs x from z
-       We use MSE (mean squared error): ||x - decoder(z)||²
-    2. KL divergence: how different q(z|x) is from the prior p(z) = N(0,I)
-       This regularizes the latent space to be smooth and continuous.
+    ELBO는 두 항으로 분해됨:
+    1. Reconstruction loss: decoder가 z에서 x를 얼마나 잘 복원하는지
+       MSE (mean squared error)를 사용함: ||x - decoder(z)||²
+    2. KL divergence: q(z|x)가 prior p(z) = N(0,I)와 얼마나 다른지
+       latent space가 부드럽고 연속적이도록 정규화함.
 
-    Why KL divergence? It forces the latent space to have nice properties:
-    - Mean near 0, variance near 1 (matching the prior)
-    - Smooth transitions between nearby z values
-    - We can sample from N(0,I) at inference time and decode to generate new data
+    왜 KL divergence인가? latent space에 좋은 성질을 강제함:
+    - 평균이 0 근처, 분산이 1 근처 (prior와 일치)
+    - 인접한 z 값 사이의 부드러운 전이
+    - 추론 시 N(0,I)에서 샘플링해 decode하면 새로운 데이터를 생성할 수 있음
 
-    Without KL regularization, the encoder would learn arbitrary, discontinuous
-    mappings (e.g., cluster 1 → z=[100,0], cluster 2 → z=[-50,200]) and the decoder
-    would overfit. The latent space would be useless for generation because random
-    samples from N(0,1) would decode to garbage.
+    KL 정규화 없이는 encoder가 임의의 불연속적 매핑을 학습하고
+    (예: cluster 1 → z=[100,0], cluster 2 → z=[-50,200]) decoder가
+    overfit하게 됨. N(0,1)에서의 랜덤 sample이 쓸모없는 결과를 decode하므로
+    latent space가 생성에 쓸모없게 됨.
     """
-    # Reconstruction loss: MSE between input and reconstructed output
+    # Reconstruction loss: input과 복원된 output 사이의 MSE
     reconstruction_loss = sum((x[i] - x_recon[i]) ** 2 for i in range(len(x)))
 
-    # KL divergence KL(q(z|x) || p(z)) for diagonal Gaussians.
-    # When both q and p are Gaussian, KL has a closed form (no sampling needed):
+    # 대각 Gaussian에 대한 KL divergence KL(q(z|x) || p(z)).
+    # q와 p가 모두 Gaussian이면, KL이 closed form을 가짐 (sampling 불필요):
     #   KL(N(μ, σ²) || N(0,I)) = 0.5 * sum(1 + log(σ²) - μ² - σ²)
     #                           = 0.5 * sum(1 + log_var - mean² - exp(log_var))
     #
@@ -253,24 +252,24 @@ def compute_loss(
     #   σ²: exp(log_var)
     #   log(σ²): log_var
     #
-    # Why this has a closed form: both distributions are Gaussian, and the KL between
-    # two Gaussians is analytic (no integrals to compute).
+    # 왜 closed form인가: 두 분포가 모두 Gaussian이고, 두 Gaussian 사이의 KL은
+    # 해석적임 (적분 계산 불필요).
     #
-    # KL clamping: we clamp log_var to [-5, 5] to prevent exp(log_var) explosion.
-    # exp(5) = 148 (reasonable variance); exp(10) = 22,026 (KL blows up and gradients
-    # vanish). Without clamping, the encoder can output extreme log_var values that
-    # cause numerical instability.
+    # KL clamping: exp(log_var) 폭발을 방지하기 위해 log_var를 [-5, 5]로 clamp함.
+    # exp(5) = 148 (합리적인 분산); exp(10) = 22,026 (KL이 폭발하고 gradient가
+    # vanish함). clamping 없이는 encoder가 극단적인 log_var 값을 출력해
+    # 수치적 불안정성을 유발할 수 있음.
     kl_loss = 0.0
     for i in range(len(mean)):
-        # Clamp log_var to prevent numerical explosion
+        # 수치적 폭발을 방지하기 위해 log_var를 clamp함
         clamped_lv = max(min(log_var[i], 5.0), -5.0)
         kl_loss += 1.0 + clamped_lv - mean[i] ** 2 - math.exp(clamped_lv)
-    kl_loss = -0.5 * kl_loss  # negative because we derived the formula with a minus sign
+    kl_loss = -0.5 * kl_loss  # 수식을 마이너스 부호로 유도했으므로 음수를 취함
 
-    # Total ELBO loss (we minimize negative ELBO, which is equivalent to maximizing ELBO)
-    # β-weighting: β=1 is standard VAE. β>1 (β-VAE) encourages disentangled representations
-    # by penalizing KL more heavily, trading off reconstruction quality for latent space
-    # structure. β<1 emphasizes reconstruction at the cost of a messier latent space.
+    # 총 ELBO loss (negative ELBO를 최소화하며, 이는 ELBO를 최대화하는 것과 동일함)
+    # β-weighting: β=1은 표준 VAE. β>1 (β-VAE)은 KL에 더 큰 페널티를 줘
+    # 복원 품질과 latent space 구조 사이의 trade-off로 disentangled representation을
+    # 촉진함. β<1은 복원을 강조하는 대신 latent space가 덜 정돈됨.
     total_loss = reconstruction_loss + beta * kl_loss
 
     return total_loss, reconstruction_loss, kl_loss
@@ -322,17 +321,17 @@ def backward_and_update(
     lr: float,
     beta: float,
 ) -> None:
-    """Compute gradients and update parameters using Adam optimizer.
+    """gradient를 계산하고 Adam optimizer로 파라미터를 업데이트함.
 
-    This function is intentionally long — it shows the full gradient flow from
-    reconstruction loss and KL divergence back through the decoder, reparameterization,
-    and encoder. The reparameterization trick gradient is the key insight.
+    이 함수는 의도적으로 김 — reconstruction loss와 KL divergence에서
+    decoder, reparameterization, encoder를 거쳐 전체 gradient 흐름을 보여줌.
+    reparameterization trick gradient가 핵심 통찰임.
     """
-    # --- Gradient of reconstruction loss w.r.t. reconstructed output ---
+    # --- 복원된 output에 대한 reconstruction loss의 gradient ---
     # d(MSE)/d(x_recon) = 2 * (x_recon - x)
     grad_recon = [2.0 * (x_recon[i] - x[i]) for i in range(len(x))]
 
-    # --- Backprop through decoder ---
+    # --- decoder를 통한 backprop ---
     # Decoder output layer: x_recon = dec_w2 @ dec_hidden + dec_b2
     grad_dec_b2 = grad_recon[:]
     grad_dec_w2 = [[grad_recon[i] * dec_hidden[j] for j in range(len(dec_hidden))]
@@ -349,7 +348,7 @@ def backward_and_update(
     grad_z_recon = [sum(dec_w1[i][j] * grad_dec_hidden[i] for i in range(len(grad_dec_hidden)))
                     for j in range(len(z))]
 
-    # --- Gradient of KL divergence w.r.t. mean and log_var ---
+    # --- mean과 log_var에 대한 KL divergence의 gradient ---
     # KL = -0.5 * sum(1 + log_var - mean² - exp(log_var))
     # d(KL)/d(mean) = -0.5 * (-2 * mean) = mean
     # d(KL)/d(log_var) = -0.5 * (1 - exp(log_var))
@@ -357,7 +356,7 @@ def backward_and_update(
     grad_logvar_kl = [beta * -0.5 * (1.0 - math.exp(max(min(log_var[i], 5.0), -5.0)))
                       for i in range(len(log_var))]
 
-    # --- Gradient through reparameterization trick ---
+    # --- reparameterization trick을 통한 gradient ---
     # z = mean + exp(0.5 * log_var) * epsilon
     # d(loss)/d(mean) = d(loss)/d(z) * d(z)/d(mean) + d(KL)/d(mean)
     #                 = d(loss)/d(z) * 1 + d(KL)/d(mean)
@@ -369,7 +368,7 @@ def backward_and_update(
     grad_logvar = [grad_z_recon[i] * 0.5 * math.exp(0.5 * log_var[i]) * epsilon[i] + grad_logvar_kl[i]
                    for i in range(len(log_var))]
 
-    # --- Backprop through encoder ---
+    # --- encoder를 통한 backprop ---
     # Encoder mean head: mean = enc_w_mean @ enc_hidden + enc_b_mean
     grad_enc_b_mean = grad_mean[:]
     grad_enc_w_mean = [[grad_mean[i] * enc_hidden[j] for j in range(len(enc_hidden))]
@@ -384,7 +383,7 @@ def backward_and_update(
     grad_enc_hidden_logvar = [sum(enc_w_logvar[i][j] * grad_logvar[i] for i in range(len(grad_logvar)))
                               for j in range(len(enc_hidden))]
 
-    # Combine gradients from both heads
+    # 두 head의 gradient를 합침
     grad_enc_hidden = [grad_enc_hidden_mean[i] + grad_enc_hidden_logvar[i]
                        for i in range(len(enc_hidden))]
 
@@ -395,30 +394,30 @@ def backward_and_update(
     grad_enc_w1 = [[grad_enc_hidden[i] * x[j] for j in range(len(x))]
                    for i in range(len(grad_enc_hidden))]
 
-    # --- Adam update ---
-    # Adam: adaptive learning rate per parameter using first and second moment estimates.
+    # --- Adam 업데이트 ---
+    # Adam: first moment와 second moment 추정치를 사용해 파라미터별 적응적 learning rate를 적용함.
     # m_t = β₁ * m_{t-1} + (1 - β₁) * g_t
     # v_t = β₂ * v_{t-1} + (1 - β₂) * g_t²
     # θ_t = θ_{t-1} - α * m_t / (sqrt(v_t) + ε)
     #
-    # ε prevents division by zero when v (second moment) is near zero.
-    # Standard hyperparameters: β₁=0.9, β₂=0.999, ε=1e-8 (matches PyTorch/TensorFlow).
+    # ε는 v (second moment)가 0에 가까울 때 0으로 나누는 것을 방지함.
+    # 표준 hyperparameter: β₁=0.9, β₂=0.999, ε=1e-8 (PyTorch/TensorFlow과 동일).
     beta1, beta2, eps = 0.9, 0.999, 1e-8
 
-    # Helper to update a single parameter with Adam
+    # 단일 파라미터를 Adam으로 업데이트하는 helper
     def adam_update(param, grad, m, v):
         for i in range(len(param)):
-            if isinstance(param[i], list):  # weight matrix
+            if isinstance(param[i], list):  # weight 행렬
                 for j in range(len(param[i])):
                     m[i][j] = beta1 * m[i][j] + (1 - beta1) * grad[i][j]
                     v[i][j] = beta2 * v[i][j] + (1 - beta2) * grad[i][j] ** 2
                     param[i][j] -= lr * m[i][j] / (math.sqrt(v[i][j]) + eps)
-            else:  # bias vector
+            else:  # bias 벡터
                 m[i] = beta1 * m[i] + (1 - beta1) * grad[i]
                 v[i] = beta2 * v[i] + (1 - beta2) * grad[i] ** 2
                 param[i] -= lr * m[i] / (math.sqrt(v[i]) + eps)
 
-    # Update encoder parameters
+    # encoder 파라미터 업데이트
     adam_update(enc_w1, grad_enc_w1, m_enc_w1, v_enc_w1)
     adam_update(enc_b1, grad_enc_b1, m_enc_b1, v_enc_b1)
     adam_update(enc_w_mean, grad_enc_w_mean, m_enc_w_mean, v_enc_w_mean)
@@ -426,7 +425,7 @@ def backward_and_update(
     adam_update(enc_w_logvar, grad_enc_w_logvar, m_enc_w_logvar, v_enc_w_logvar)
     adam_update(enc_b_logvar, grad_enc_b_logvar, m_enc_b_logvar, v_enc_b_logvar)
 
-    # Update decoder parameters
+    # decoder 파라미터 업데이트
     adam_update(dec_w1, grad_dec_w1, m_dec_w1, v_dec_w1)
     adam_update(dec_b1, grad_dec_b1, m_dec_b1, v_dec_b1)
     adam_update(dec_w2, grad_dec_w2, m_dec_w2, v_dec_w2)
@@ -440,7 +439,7 @@ if __name__ == "__main__":
     data = generate_data()
     print(f"Generated {len(data)} 2D points\n")
 
-    # Initialize encoder weights
+    # encoder weight 초기화
     enc_w1 = init_weights(HIDDEN_DIM, 2)          # 2D input → hidden
     enc_b1 = init_bias(HIDDEN_DIM)
     enc_w_mean = init_weights(LATENT_DIM, HIDDEN_DIM)  # hidden → mean
@@ -448,17 +447,17 @@ if __name__ == "__main__":
     enc_w_logvar = init_weights(LATENT_DIM, HIDDEN_DIM)  # hidden → log_var
     enc_b_logvar = init_bias(LATENT_DIM)
 
-    # Initialize decoder weights
+    # decoder weight 초기화
     dec_w1 = init_weights(HIDDEN_DIM, LATENT_DIM)  # latent → hidden
     dec_b1 = init_bias(HIDDEN_DIM)
     dec_w2 = init_weights(2, HIDDEN_DIM)          # hidden → 2D output
     dec_b2 = init_bias(2)
 
-    # Initialize Adam moment buffers (all zeros)
+    # Adam moment 버퍼 초기화 (모두 0)
     def init_moments_like(shape):
-        if isinstance(shape[0], list):  # matrix
+        if isinstance(shape[0], list):  # 행렬
             return [[0.0 for _ in range(len(shape[0]))] for _ in range(len(shape))]
-        else:  # vector
+        else:  # 벡터
             return [0.0 for _ in range(len(shape))]
 
     m_enc_w1, v_enc_w1 = init_moments_like(enc_w1), init_moments_like(enc_w1)
@@ -478,14 +477,14 @@ if __name__ == "__main__":
     print("-" * 48)
 
     for epoch in range(NUM_EPOCHS):
-        # Shuffle data for stochastic gradient descent
+        # stochastic gradient descent를 위해 데이터를 셔플함
         random.shuffle(data)
 
         epoch_total_loss = 0.0
         epoch_recon_loss = 0.0
         epoch_kl_loss = 0.0
 
-        # Process data in minibatches
+        # 데이터를 minibatch로 처리함
         for i in range(0, len(data), BATCH_SIZE):
             batch = data[i : i + BATCH_SIZE]
 
@@ -501,14 +500,14 @@ if __name__ == "__main__":
                 z = reparameterize(mean, log_var)
                 dec_hidden, x_recon = decoder_forward(z, dec_w1, dec_b1, dec_w2, dec_b2)
 
-                # Compute loss
+                # Loss 계산
                 total_loss, recon_loss, kl_loss = compute_loss(x, mean, log_var, x_recon, BETA)
 
                 batch_total_loss += total_loss
                 batch_recon_loss += recon_loss
                 batch_kl_loss += kl_loss
 
-                # Backward pass and update
+                # Backward pass 및 업데이트
                 backward_and_update(
                     x, mean, log_var, z, x_recon, enc_hidden, dec_hidden,
                     enc_w1, enc_b1, enc_w_mean, enc_b_mean, enc_w_logvar, enc_b_logvar,
@@ -521,7 +520,7 @@ if __name__ == "__main__":
                     LEARNING_RATE, BETA,
                 )
 
-            # Average loss over batch
+            # batch 평균 loss
             batch_total_loss /= len(batch)
             batch_recon_loss /= len(batch)
             batch_kl_loss /= len(batch)
@@ -530,13 +529,13 @@ if __name__ == "__main__":
             epoch_recon_loss += batch_recon_loss
             epoch_kl_loss += batch_kl_loss
 
-        # Average loss over all batches
+        # 전체 batch 평균 loss
         num_batches = (len(data) + BATCH_SIZE - 1) // BATCH_SIZE
         epoch_total_loss /= num_batches
         epoch_recon_loss /= num_batches
         epoch_kl_loss /= num_batches
 
-        # Print progress every 100 epochs
+        # 100 epoch마다 진행 상황 출력
         if (epoch + 1) % 100 == 0 or epoch == 0:
             print(f"{epoch + 1:<8} {epoch_total_loss:<12.4f} {epoch_recon_loss:<12.4f} {epoch_kl_loss:<12.4f}")
 
@@ -549,11 +548,11 @@ if __name__ == "__main__":
     print("=" * 60)
     print("Encode two data points, interpolate in latent space, decode.\n")
 
-    # Pick two points from different clusters
-    point_a = data[0]      # likely from one cluster
-    point_b = data[200]    # likely from a different cluster
+    # 서로 다른 cluster에서 두 포인트를 선택함
+    point_a = data[0]      # 한 cluster에서 온 것으로 추정됨
+    point_b = data[200]    # 다른 cluster에서 온 것으로 추정됨
 
-    # Encode both points
+    # 두 포인트를 encode함
     _, mean_a, log_var_a = encoder_forward(
         point_a, enc_w1, enc_b1, enc_w_mean, enc_b_mean, enc_w_logvar, enc_b_logvar
     )
@@ -568,10 +567,10 @@ if __name__ == "__main__":
 
     print("Interpolation (5 steps from A to B):")
     for alpha in [0.0, 0.25, 0.5, 0.75, 1.0]:
-        # Linearly interpolate in latent space
+        # latent space에서 선형 보간함
         z_interp = [mean_a[i] * (1 - alpha) + mean_b[i] * alpha for i in range(LATENT_DIM)]
 
-        # Decode the interpolated latent point
+        # 보간된 latent 포인트를 decode함
         _, x_interp = decoder_forward(z_interp, dec_w1, dec_b1, dec_w2, dec_b2)
 
         print(f"  α={alpha:.2f}: z={[round(v, 3) for v in z_interp]} → x={[round(v, 3) for v in x_interp]}")
@@ -585,10 +584,10 @@ if __name__ == "__main__":
 
     generated_points = []
     for _ in range(10):
-        # Sample from the prior N(0,1)
+        # prior N(0,1)에서 샘플링함
         z_sample = [random.gauss(0, 1) for _ in range(LATENT_DIM)]
 
-        # Decode to generate a new 2D point
+        # decode해 새로운 2D 포인트를 생성함
         _, x_gen = decoder_forward(z_sample, dec_w1, dec_b1, dec_w2, dec_b2)
 
         generated_points.append(x_gen)
@@ -606,16 +605,16 @@ if __name__ == "__main__":
 
     print("Original → Reconstructed (5 samples):")
     for i in range(5):
-        x_orig = data[i * 100]  # sample every 100th point
+        x_orig = data[i * 100]  # 100번째 포인트마다 샘플링함
 
-        # Encode and decode
+        # encode하고 decode함
         _, mean, log_var = encoder_forward(
             x_orig, enc_w1, enc_b1, enc_w_mean, enc_b_mean, enc_w_logvar, enc_b_logvar
         )
-        z = mean  # use mean (no sampling) for reconstruction quality check
+        z = mean  # 복원 품질 확인을 위해 mean을 사용 (sampling 없음)
         _, x_rec = decoder_forward(z, dec_w1, dec_b1, dec_w2, dec_b2)
 
-        # Compute reconstruction error
+        # 복원 오차를 계산함
         error = math.sqrt(sum((x_orig[j] - x_rec[j]) ** 2 for j in range(len(x_orig))))
 
         print(f"  {[round(v, 3) for v in x_orig]} → {[round(v, 3) for v in x_rec]} (error: {error:.4f})")

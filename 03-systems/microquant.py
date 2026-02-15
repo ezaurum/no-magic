@@ -1,6 +1,6 @@
 """
-How to shrink a model by 4x with minimal quality loss -- the math behind INT8 and INT4
-weight quantization, demonstrated end-to-end: train, quantize, dequantize, compare.
+최소한의 품질 손실로 모델을 4배 줄이는 방법 -- INT8과 INT4 가중치 quantization의
+수학을 엔드투엔드로 시연함: 학습, 양자화, 역양자화, 비교.
 """
 # Reference: Dettmers et al., "LLM.int8(): 8-bit Matrix Multiplication for Transformers
 # at Scale" (2022). https://arxiv.org/abs/2208.07339
@@ -20,32 +20,32 @@ random.seed(42)
 
 # === CONSTANTS AND HYPERPARAMETERS ===
 
-# Model architecture (identical to microgpt for consistency)
+# 모델 아키텍처 (일관성을 위해 microgpt와 동일)
 N_EMBD = 16
 N_HEAD = 4
 N_LAYER = 1
 BLOCK_SIZE = 16
 HEAD_DIM = N_EMBD // N_HEAD  # 4
 
-# Training parameters
+# 학습 파라미터
 LEARNING_RATE = 0.01
 BETA1 = 0.85
 BETA2 = 0.99
 EPS_ADAM = 1e-8
 NUM_STEPS = 800
 
-# Data parameters
+# 데이터 파라미터
 DATA_URL = "https://raw.githubusercontent.com/karpathy/makemore/master/names.txt"
 DATA_FILE = "names.txt"
 
-# Signpost: 800 steps (vs 1000 in microgpt) is sufficient because this script's focus
-# is quantization, not pushing training loss. We need a converged model, not an optimal one.
+# 참고: 800 스텝(microgpt의 1000 대비)이면 충분함. 이 스크립트의 초점은
+# quantization이지 학습 loss를 밀어붙이는 게 아니기 때문임. 수렴된 모델이 필요하지 최적 모델은 아님.
 
 
 # === DATA LOADING ===
 
 def load_data(url: str, filename: str) -> list[str]:
-    """Download and parse the training corpus."""
+    """학습 코퍼스를 다운로드하고 파싱함."""
     if not os.path.exists(filename):
         print(f"Downloading {filename}...")
         urllib.request.urlretrieve(url, filename)
@@ -59,12 +59,12 @@ def load_data(url: str, filename: str) -> list[str]:
 # === SCALAR AUTOGRAD ENGINE ===
 
 class Value:
-    """A scalar value with reverse-mode automatic differentiation.
+    """역전파 자동 미분이 있는 스칼라 값.
 
-    Tracks computational history via ._children and ._local_grads, enabling
-    gradient computation through the chain rule. Every forward operation stores
-    its local derivative (dout/dinput), then backward() replays the graph in
-    reverse topological order, accumulating gradients.
+    ._children과 ._local_grads를 통해 계산 이력을 추적해서
+    체인 룰로 gradient를 계산할 수 있게 함. 모든 순전파 연산이
+    로컬 도함수(dout/dinput)를 저장하고, backward()가 그래프를
+    역 위상 정렬 순서로 재생하면서 gradient를 누적함.
     """
     __slots__ = ('data', 'grad', '_children', '_local_grads')
 
@@ -111,7 +111,7 @@ class Value:
         return Value(max(0, self.data), (self,), (float(self.data > 0),))
 
     def backward(self):
-        """Reverse-mode autodiff via topological sort of the computation graph."""
+        """계산 그래프의 위상 정렬을 통한 역전파 자동 미분."""
         topo, visited = [], set()
         def build_topo(v):
             if v not in visited:
@@ -127,27 +127,27 @@ class Value:
 
 
 # --- AUTOGRAD IN THIS SCRIPT ---
-# This Value class follows the canonical interface exactly.
-# See docs/autograd-interface.md for the full specification.
-# Autograd is only used for training. Quantization and inference use plain floats.
+# 이 Value 클래스는 정규 인터페이스를 정확히 따름.
+# 전체 스펙은 docs/autograd-interface.md 참조.
+# autograd는 학습에만 사용됨. quantization과 추론은 일반 float를 사용함.
 
 
 # === PARAMETER INITIALIZATION ===
 
 def make_matrix(nrows: int, ncols: int, std: float = 0.08) -> list[list[Value]]:
-    """Gaussian-initialized weight matrix. std=0.08 works for this tiny model."""
+    """가우시안 초기화된 가중치 행렬. std=0.08은 이 작은 모델에 적합함."""
     return [[Value(random.gauss(0, std)) for _ in range(ncols)] for _ in range(nrows)]
 
 
 # === CORE OPERATIONS (AUTOGRAD) ===
 
 def linear(x: list[Value], w: list[list[Value]]) -> list[Value]:
-    """y = W @ x. The fundamental neural network operation."""
+    """y = W @ x. 근본적인 신경망 연산임."""
     return [sum(w_row[j] * x[j] for j in range(len(x))) for w_row in w]
 
 
 def softmax(logits: list[Value]) -> list[Value]:
-    """Stable softmax: exp(x - max(x)) / sum(exp(x_j - max(x_j)))."""
+    """안정적인 softmax: exp(x - max(x)) / sum(exp(x_j - max(x_j)))."""
     max_val = max(v.data for v in logits)
     exp_vals = [(v - max_val).exp() for v in logits]
     total = sum(exp_vals)
@@ -155,30 +155,30 @@ def softmax(logits: list[Value]) -> list[Value]:
 
 
 def rmsnorm(x: list[Value]) -> list[Value]:
-    """RMSNorm(x) = x / sqrt(mean(x^2) + eps). No learned affine parameters."""
+    """RMSNorm(x) = x / sqrt(mean(x^2) + eps). 학습 가능한 어파인 파라미터 없음."""
     mean_sq = sum(xi * xi for xi in x) / len(x)
     scale = (mean_sq + 1e-5) ** -0.5
     return [xi * scale for xi in x]
 
 
 def safe_log(prob: Value) -> Value:
-    """Clipped log to prevent log(0) = -inf from breaking gradients."""
+    """gradient 깨짐을 방지하기 위해 클리핑된 log. log(0) = -inf를 막음."""
     clamped = max(prob.data, 1e-10)
     return Value(math.log(clamped), (prob,), (1.0 / clamped,))
 
 
 # === CORE OPERATIONS (PLAIN FLOAT -- for quantized inference) ===
-# After quantization, weights are dequantized back to floats. These functions
-# mirror the autograd versions but operate on raw floats -- no gradient tracking
-# because quantized models are inference-only.
+# quantization 후 가중치는 float로 역양자화됨. 이 함수들은
+# autograd 버전과 동일하지만 원시 float로 동작함 — 양자화된
+# 모델은 추론 전용이라 gradient 추적이 없음.
 
 def linear_float(x: list[float], w: list[list[float]]) -> list[float]:
-    """y = W @ x with plain floats. Used for post-quantization inference."""
+    """y = W @ x를 일반 float로 계산함. quantization 후 추론에 사용됨."""
     return [sum(w_row[j] * x[j] for j in range(len(x))) for w_row in w]
 
 
 def softmax_float(logits: list[float]) -> list[float]:
-    """Stable softmax on plain float logits."""
+    """일반 float logits에 대한 안정적인 softmax."""
     max_val = max(logits)
     exp_vals = [math.exp(v - max_val) for v in logits]
     total = sum(exp_vals)
@@ -186,7 +186,7 @@ def softmax_float(logits: list[float]) -> list[float]:
 
 
 def rmsnorm_float(x: list[float]) -> list[float]:
-    """RMSNorm on plain floats."""
+    """일반 float에 대한 RMSNorm."""
     mean_sq = sum(xi * xi for xi in x) / len(x)
     scale = (mean_sq + 1e-5) ** -0.5
     return [xi * scale for xi in x]
@@ -199,7 +199,7 @@ def gpt_forward(
     keys: list[list[list[Value]]], values: list[list[list[Value]]],
     params: dict,
 ) -> list[Value]:
-    """Single-token forward pass through the GPT. Returns vocab logits."""
+    """GPT를 통한 단일 토큰 순전파. 어휘 logits을 반환함."""
     tok_emb = params['wte'][token_id]
     pos_emb = params['wpe'][pos_id]
     x = [t + p for t, p in zip(tok_emb, pos_emb)]
@@ -244,15 +244,15 @@ def gpt_forward(
 
 
 # === GPT FORWARD PASS (PLAIN FLOAT -- for quantized inference) ===
-# Structurally identical to gpt_forward but operates on dequantized float weights.
-# This separation keeps autograd overhead out of the quantization evaluation path.
+# gpt_forward와 구조적으로 동일하지만 역양자화된 float 가중치로 동작함.
+# 이 분리로 quantization 평가 경로에서 autograd 오버헤드를 제거함.
 
 def gpt_forward_float(
     token_id: int, pos_id: int,
     keys: list[list[list[float]]], values: list[list[list[float]]],
     float_params: dict[str, list[list[float]]],
 ) -> list[float]:
-    """Single-token forward pass with plain float weights. No gradient tracking."""
+    """일반 float 가중치를 사용한 단일 토큰 순전파. gradient 추적 없음."""
     tok_emb = float_params['wte'][token_id]
     pos_emb = float_params['wpe'][pos_id]
     x = [t + p for t, p in zip(tok_emb, pos_emb)]
@@ -289,7 +289,7 @@ def gpt_forward_float(
         x_residual = x
         x = rmsnorm_float(x)
         x = linear_float(x, float_params[f'layer{layer_idx}.mlp_fc1'])
-        x = [max(0.0, xi) for xi in x]  # ReLU on plain floats
+        x = [max(0.0, xi) for xi in x]  # 일반 float에 대한 ReLU
         x = linear_float(x, float_params[f'layer{layer_idx}.mlp_fc2'])
         x = [a + b for a, b in zip(x, x_residual)]
 
@@ -297,21 +297,21 @@ def gpt_forward_float(
 
 
 # === QUANTIZATION FUNCTIONS ===
-# Quantization maps continuous float weights to a discrete integer grid.
-# The core insight: neural network weights are approximately normally distributed
-# with small magnitude. Most values cluster near zero, so mapping to [-127, +127]
-# (INT8) or [-8, +7] (INT4) loses surprisingly little information. The network's
-# nonlinearities and redundancy absorb the rounding error.
+# quantization은 연속적인 float 가중치를 이산 정수 격자에 매핑함.
+# 핵심 통찰: 신경망 가중치는 대략 정규 분포이며 크기가 작음.
+# 대부분의 값이 0 근처에 모여 있어서, [-127, +127] (INT8)이나
+# [-8, +7] (INT4)로 매핑해도 의외로 적은 정보만 손실됨. 네트워크의
+# 비선형성과 중복성이 반올림 오차를 흡수함.
 
 def quantize_absmax_int8(weights_float: list[list[float]]) -> tuple[list[list[int]], float]:
     """Absmax quantization: scale = max(|W|) / 127, q = round(W / scale).
 
-    Maps the float range [-max|W|, +max|W|] to integer range [-127, +127].
-    Symmetric around zero -- assumes weight distribution is roughly centered.
-    This is the simplest quantization scheme and the baseline for everything else.
+    float 범위 [-max|W|, +max|W|]를 정수 범위 [-127, +127]로 매핑함.
+    0을 중심으로 대칭 — 가중치 분포가 대략 중심에 있다고 가정함.
+    가장 단순한 quantization 방식이며 다른 모든 것의 기준선임.
 
-    Math: q_i = clamp(round(w_i / s), -127, 127)  where s = max(|W|) / 127
-    Dequant: w_hat_i = q_i * s
+    수식: q_i = clamp(round(w_i / s), -127, 127)  여기서 s = max(|W|) / 127
+    역양자화: w_hat_i = q_i * s
     """
     max_abs = max(abs(w) for row in weights_float for w in row)
     if max_abs == 0:
@@ -322,16 +322,15 @@ def quantize_absmax_int8(weights_float: list[list[float]]) -> tuple[list[list[in
 
 
 def quantize_absmax_int4(weights_float: list[list[float]]) -> tuple[list[list[int]], float]:
-    """INT4 quantization: maps to [-8, +7] (4-bit signed integer range).
+    """INT4 quantization: [-8, +7] (4비트 부호 있는 정수 범위)로 매핑함.
 
-    8x compression vs float32. The quantization grid is 16x coarser than INT8,
-    so rounding errors are substantially larger. Neural nets tolerate this because
-    individual weight precision matters less than the collective statistical
-    properties of weight matrices.
+    float32 대비 8배 압축. quantization 격자가 INT8보다 16배 거칠어서
+    반올림 오차가 상당히 커짐. 신경망이 이걸 견디는 이유는 개별 가중치
+    정밀도보다 가중치 행렬의 전체적 통계적 특성이 더 중요하기 때문임.
 
-    Signpost: production INT4 (GPTQ, AWQ) uses calibration data to minimize
-    output error rather than naive round-to-nearest. That reduces quality loss
-    by 2-5x but requires a calibration dataset.
+    참고: 프로덕션 INT4 (GPTQ, AWQ)는 단순 반올림 대신 보정 데이터를 사용해서
+    출력 오차를 최소화함. 이렇게 하면 품질 손실이 2-5배 줄지만
+    보정 데이터셋이 필요함.
     """
     max_abs = max(abs(w) for row in weights_float for w in row)
     if max_abs == 0:
@@ -344,17 +343,17 @@ def quantize_absmax_int4(weights_float: list[list[float]]) -> tuple[list[list[in
 def quantize_zeropoint_int8(
     weights_float: list[list[float]],
 ) -> tuple[list[list[int]], float, int]:
-    """Zero-point (asymmetric) quantization: maps [min_W, max_W] to [0, 255].
+    """Zero-point (비대칭) quantization: [min_W, max_W]를 [0, 255]로 매핑함.
 
-    Unlike absmax which centers on zero, zero-point shifts the mapping so the
-    full 8-bit range covers the actual weight range. More accurate when weights
-    are not symmetric around zero (common after ReLU-heavy architectures where
-    biases shift distributions).
+    0을 중심으로 하는 absmax와 달리, zero-point는 전체 8비트 범위가
+    실제 가중치 범위를 커버하도록 매핑을 시프트함. 가중치가 0을 중심으로
+    대칭이 아닐 때 더 정확함 (ReLU 위주 아키텍처에서 바이어스가 분포를
+    이동시킨 경우에 흔함).
 
-    Math: scale = (w_max - w_min) / 255
+    수식: scale = (w_max - w_min) / 255
           zero_point = round(-w_min / scale)
           q_i = clamp(round(w_i / scale) + zero_point, 0, 255)
-    Dequant: w_hat_i = (q_i - zero_point) * scale
+    역양자화: w_hat_i = (q_i - zero_point) * scale
     """
     all_weights = [w for row in weights_float for w in row]
     w_min = min(all_weights)
@@ -373,15 +372,15 @@ def quantize_zeropoint_int8(
 def quantize_per_channel_int8(
     weights_float: list[list[float]],
 ) -> tuple[list[list[int]], list[float]]:
-    """Per-channel quantization: each output row gets its own scale factor.
+    """Per-channel quantization: 각 출력 행이 자체 스케일 팩터를 가짐.
 
-    Per-tensor quantization uses one scale for the entire matrix, so a single
-    outlier weight forces the entire grid to be coarse. Per-channel (per-row)
-    quantization lets each output neuron use its own range, dramatically reducing
-    error for matrices with non-uniform row magnitudes.
+    Per-tensor quantization은 전체 행렬에 하나의 스케일을 사용하므로,
+    하나의 이상치 가중치가 전체 격자를 거칠게 만듦. Per-channel (per-row)
+    quantization은 각 출력 뉴런이 자체 범위를 사용해서, 행 크기가
+    불균일한 행렬에서 오차를 크게 줄임.
 
-    Signpost: LLM.int8() (Dettmers 2022) goes further with mixed-precision
-    decomposition -- outlier channels stay in fp16 while the rest quantize to INT8.
+    참고: LLM.int8() (Dettmers 2022)는 혼합 정밀도 분해로 더 나아감
+    -- 이상치 채널은 fp16으로 유지하고 나머지만 INT8로 양자화함.
     """
     quantized = []
     scales = []
@@ -394,25 +393,25 @@ def quantize_per_channel_int8(
 
 
 # === DEQUANTIZATION FUNCTIONS ===
-# Reverse the quantization mapping to recover approximate float weights.
-# The difference between original and dequantized weights is the quantization error.
+# quantization 매핑을 역으로 적용해서 근사 float 가중치를 복구함.
+# 원본과 역양자화된 가중치의 차이가 quantization 오차임.
 
 def dequantize_absmax(quantized: list[list[int]], scale: float) -> list[list[float]]:
-    """w_hat = q * scale. Simple multiplication recovers approximate floats."""
+    """w_hat = q * scale. 단순 곱셈으로 근사 float를 복구함."""
     return [[q * scale for q in row] for row in quantized]
 
 
 def dequantize_zeropoint(
     quantized: list[list[int]], scale: float, zero_point: int,
 ) -> list[list[float]]:
-    """w_hat = (q - zero_point) * scale. Undo the asymmetric shift."""
+    """w_hat = (q - zero_point) * scale. 비대칭 시프트를 되돌림."""
     return [[(q - zero_point) * scale for q in row] for row in quantized]
 
 
 def dequantize_per_channel(
     quantized: list[list[int]], scales: list[float],
 ) -> list[list[float]]:
-    """w_hat[i] = q[i] * scale[row_index]. Each row uses its own scale."""
+    """w_hat[i] = q[i] * scale[row_index]. 각 행이 자체 스케일을 사용함."""
     return [
         [q * scales[i] for q in quantized[i]]
         for i in range(len(quantized))
@@ -422,7 +421,7 @@ def dequantize_per_channel(
 # === EVALUATION HELPERS ===
 
 def extract_float_weights(params: dict) -> dict[str, list[list[float]]]:
-    """Extract Value.data from all parameter matrices into plain float lists."""
+    """모든 파라미터 행렬에서 Value.data를 일반 float 리스트로 추출함."""
     float_weights: dict[str, list[list[float]]] = {}
     for name, matrix in params.items():
         float_weights[name] = [[v.data for v in row] for row in matrix]
@@ -430,10 +429,10 @@ def extract_float_weights(params: dict) -> dict[str, list[list[float]]]:
 
 
 def compute_model_size(float_weights: dict[str, list[list[float]]], bits: int) -> int:
-    """Compute model size in bytes at the given bit width.
+    """주어진 비트 폭에서의 모델 크기를 바이트 단위로 계산함.
 
     Float32 = 4 bytes/weight, INT8 = 1 byte/weight, INT4 = 0.5 bytes/weight.
-    Scale factors add negligible overhead (one float per matrix or per row).
+    스케일 팩터의 오버헤드는 무시할 수준 (행렬 또는 행당 float 하나).
     """
     n_weights = sum(len(row) for matrix in float_weights.values() for row in matrix)
     return int(n_weights * bits / 8)
@@ -443,11 +442,10 @@ def compute_roundtrip_error(
     original: dict[str, list[list[float]]],
     dequantized: dict[str, list[list[float]]],
 ) -> float:
-    """Max absolute error across all weights: max |w - dequant(quant(w))|.
+    """모든 가중치에 걸친 최대 절대 오차: max |w - dequant(quant(w))|.
 
-    This is the worst-case single-weight error. Mean error is typically 10-100x
-    smaller, but max error determines whether any particular computation path
-    experiences catastrophic distortion.
+    이건 최악의 단일 가중치 오차임. 평균 오차는 보통 10-100배 작지만,
+    최대 오차가 특정 계산 경로에서 치명적 왜곡이 발생하는지를 결정함.
     """
     max_err = 0.0
     for name in original:
@@ -463,7 +461,7 @@ def evaluate_loss(
     unique_chars: list[str],
     bos: int,
 ) -> float:
-    """Average cross-entropy loss on evaluation documents using float forward pass."""
+    """float 순전파를 사용한 평가 문서의 평균 크로스엔트로피 loss."""
     total_loss = 0.0
     total_tokens = 0
     for doc in eval_docs:
@@ -474,7 +472,7 @@ def evaluate_loss(
         for pos in range(seq_len):
             logits = gpt_forward_float(tokens[pos], pos, keys, values, float_params)
             probs = softmax_float(logits)
-            # Cross-entropy: -log(p(target))
+            # 크로스엔트로피: -log(p(target))
             p_target = max(probs[tokens[pos + 1]], 1e-10)
             total_loss += -math.log(p_target)
             total_tokens += 1
@@ -488,7 +486,7 @@ def generate_sample(
     vocab_size: int,
     temperature: float = 0.5,
 ) -> str:
-    """Generate a single name from the model using temperature-scaled sampling."""
+    """temperature 스케일링 샘플링으로 이름을 하나 생성함."""
     keys: list[list[list[float]]] = [[] for _ in range(N_LAYER)]
     values: list[list[list[float]]] = [[] for _ in range(N_LAYER)]
     token_id = bos
@@ -520,7 +518,7 @@ if __name__ == "__main__":
 
     print(f"Loaded {len(docs)} documents, vocabulary: {VOCAB_SIZE} tokens")
 
-    # Initialize parameters
+    # 파라미터 초기화
     params: dict[str, list[list[Value]]] = {}
     params['wte'] = make_matrix(VOCAB_SIZE, N_EMBD)
     params['wpe'] = make_matrix(BLOCK_SIZE, N_EMBD)
@@ -536,7 +534,7 @@ if __name__ == "__main__":
     param_list = [p for matrix in params.values() for row in matrix for p in row]
     print(f"Parameters: {len(param_list):,}\n")
 
-    # Adam optimizer state
+    # Adam 옵티마이저 상태
     m = [0.0] * len(param_list)
     v = [0.0] * len(param_list)
 
@@ -575,20 +573,20 @@ if __name__ == "__main__":
     print(f"\nTraining complete ({t_train - t_start:.1f}s). Final loss: {loss.data:.4f}")
 
     # === PHASE 2: EXTRACT FLOAT32 WEIGHTS ===
-    # From this point forward, autograd is not used. All operations are on plain floats.
-    # This mirrors production quantization: you receive a trained model checkpoint and
-    # apply post-training quantization (PTQ) without any additional training.
+    # 이 시점부터 autograd를 사용하지 않음. 모든 연산이 일반 float로 수행됨.
+    # 이건 프로덕션 quantization을 그대로 반영함: 학습된 모델 체크포인트를 받아서
+    # 추가 학습 없이 사후 학습 양자화(PTQ)를 적용함.
     print("\n=== Extracting Float32 Weights ===")
     float_weights = extract_float_weights(params)
 
-    # Use a fixed evaluation set (first 200 docs) for consistent loss comparison
+    # 일관된 loss 비교를 위해 고정된 평가 세트(처음 200개 문서) 사용
     eval_docs = docs[:200]
 
-    # Baseline loss with original float32 weights
+    # 원본 float32 가중치의 기준 loss
     baseline_loss = evaluate_loss(float_weights, eval_docs, unique_chars, BOS)
     print(f"Float32 baseline loss: {baseline_loss:.4f}")
 
-    # Seed reset for reproducible generation across all quantization variants
+    # 모든 quantization 변형에서 재현 가능한 생성을 위한 시드 리셋
     random.seed(42)
     baseline_sample = generate_sample(float_weights, unique_chars, BOS, VOCAB_SIZE)
 
@@ -619,9 +617,9 @@ if __name__ == "__main__":
     print(f"INT4 absmax loss: {int4_loss:.4f} (delta: {(int4_loss - baseline_loss) / baseline_loss * 100:+.1f}%)")
 
     # === PHASE 5: ZERO-POINT QUANTIZATION (ASYMMETRIC INT8) ===
-    # Useful when weight distributions are shifted away from zero. After ReLU
-    # activations or with certain initialization schemes, weights can be
-    # asymmetrically distributed. Zero-point mapping captures this asymmetry.
+    # 가중치 분포가 0에서 벗어났을 때 유용함. ReLU 활성화 후나
+    # 특정 초기화 방식에서 가중치가 비대칭적으로 분포할 수 있음.
+    # Zero-point 매핑이 이 비대칭성을 캡처함.
     print("\n=== INT8 Zero-Point Quantization ===")
     zp_weights: dict[str, list[list[float]]] = {}
     for name, matrix in float_weights.items():
@@ -635,9 +633,9 @@ if __name__ == "__main__":
     print(f"INT8 zero-point loss: {zp_loss:.4f} (delta: {(zp_loss - baseline_loss) / baseline_loss * 100:+.1f}%)")
 
     # === PHASE 6: PER-CHANNEL INT8 ===
-    # Per-tensor quantization is limited by the row with the largest outlier.
-    # Per-channel quantization gives each output channel its own scale, so a
-    # single outlier row doesn't degrade precision for the entire matrix.
+    # Per-tensor quantization은 가장 큰 이상치가 있는 행에 의해 제한됨.
+    # Per-channel quantization은 각 출력 채널에 자체 스케일을 부여해서,
+    # 하나의 이상치 행이 전체 행렬의 정밀도를 저하시키지 않음.
     print("\n=== INT8 Per-Channel Quantization ===")
     pc_weights: dict[str, list[list[float]]] = {}
     for name, matrix in float_weights.items():
@@ -680,36 +678,36 @@ if __name__ == "__main__":
     for name, bits, size, loss_val, delta, err, sample in rows:
         delta_str = "---" if delta == 0.0 else f"{delta:+.1f}%"
         err_str = "---" if err == 0.0 else f"{err:.6f}"
-        # Truncate sample for display
+        # 표시용으로 샘플을 자름
         sample_disp = sample[:12] if len(sample) > 12 else sample
         print(f"{name:<24} {bits:>4} {size:>7,} B {loss_val:>8.4f} {delta_str:>8} {err_str:>10} {sample_disp:<14}")
 
     print(f"\nCompression ratios: float32->INT8 = {size_32 / size_8:.1f}x, "
           f"float32->INT4 = {size_32 / size_4:.1f}x")
 
-    # Highlight the key finding: per-channel beats per-tensor
+    # 핵심 발견 강조: per-channel이 per-tensor보다 나음
     if pc_loss < int8_loss:
         print("Per-channel INT8 outperforms per-tensor INT8 (lower loss delta).")
     else:
         print("Per-tensor and per-channel INT8 performed comparably on this small model.")
 
     # === WHY QUANTIZATION WORKS ===
-    # Neural nets are robust to weight precision loss for two reasons:
-    # 1. Redundancy: thousands of weights contribute to each output, so individual
-    #    rounding errors average out. The central limit theorem in action.
-    # 2. Weight distributions are approximately Gaussian with small variance.
-    #    Most weights are near zero where the quantization grid is densest.
-    #    Only outlier weights suffer significant rounding error.
+    # 신경망이 가중치 정밀도 손실에 강건한 두 가지 이유:
+    # 1. 중복성: 수천 개의 가중치가 각 출력에 기여하므로, 개별 반올림
+    #    오차가 평균화됨. 중심극한정리가 작동하는 것임.
+    # 2. 가중치 분포가 대략 가우시안이고 분산이 작음.
+    #    대부분의 가중치가 quantization 격자가 가장 촘촘한 0 근처에 있음.
+    #    이상치 가중치만 큰 반올림 오차를 겪음.
     #
-    # INT8 preserves ~99% of the information (256 quantization levels).
-    # INT4 is the practical limit -- 16 levels cause visible degradation.
-    # INT2 (4 levels) typically destroys model quality entirely.
+    # INT8은 ~99%의 정보를 보존함 (256 quantization 레벨).
+    # INT4가 실용적 한계임 -- 16 레벨은 눈에 띄는 저하를 일으킴.
+    # INT2 (4 레벨)는 보통 모델 품질을 완전히 파괴함.
     #
-    # Signpost: production quantization adds several sophistications this script omits:
-    # - GPTQ/AWQ use calibration data to minimize layer-wise output reconstruction error
-    # - Mixed precision keeps sensitive layers (first/last) in higher precision
-    # - Activation quantization (not just weights) for full integer inference
-    # - Group quantization: per-channel but with groups of 32-128 elements per scale
-    # - SmoothQuant migrates quantization difficulty from activations to weights
+    # 참고: 프로덕션 quantization은 이 스크립트가 생략한 여러 정교한 기법을 추가함:
+    # - GPTQ/AWQ는 보정 데이터로 레이어별 출력 재구성 오차를 최소화함
+    # - 혼합 정밀도는 민감한 레이어(첫째/마지막)를 더 높은 정밀도로 유지함
+    # - 활성화 quantization (가중치뿐 아니라)으로 완전한 정수 추론
+    # - 그룹 quantization: per-channel이지만 스케일당 32-128개 원소 그룹
+    # - SmoothQuant는 quantization 난이도를 활성화에서 가중치로 이전함
 
     print(f"\nTotal runtime: {t_end - t_start:.1f}s")
